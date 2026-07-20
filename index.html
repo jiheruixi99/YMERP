@@ -1,0 +1,189 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>火鍋店 ERP — 食材成本控制系統</title>
+<style>
+:root{
+  --sidebar-bg:#141c28;
+  --sidebar-text:#e8edf4;
+  --sidebar-muted:#8fa0b5;
+  --content-bg:#eef1f5;
+  --card-bg:#ffffff;
+  --text:#17202b;
+  --text-muted:#5b6b7d;
+  --accent:#c62f2f;
+  --accent-dark:#a02020;
+  --ok:#1e7d43;
+  --warn:#b26a00;
+  --bad:#c62f2f;
+  --line:#d8dee7;
+  --blue:#1f5fa8;
+  --radius:10px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;background:var(--content-bg);color:var(--text);font-size:14px}
+a{color:var(--blue)}
+
+/* ===== Layout ===== */
+#app{display:flex;min-height:100vh}
+#sidebar{width:220px;background:var(--sidebar-bg);color:var(--sidebar-text);flex-shrink:0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+#main{flex:1;min-width:0;display:flex;flex-direction:column}
+#topbar{background:var(--card-bg);border-bottom:1px solid var(--line);padding:10px 20px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:50}
+#topbar h1{font-size:17px;font-weight:700}
+#content{padding:18px 20px 60px;max-width:1280px;width:100%}
+
+/* sidebar */
+.logo{padding:16px 16px 12px;font-size:18px;font-weight:800;letter-spacing:1px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #26324a}
+.logo .pot{font-size:22px}
+.nav-group{padding:10px 10px 2px}
+.nav-group .g-title{font-size:11px;color:var(--sidebar-muted);padding:4px 8px;letter-spacing:2px}
+.nav-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--sidebar-text);font-size:13.5px;margin:1px 0;user-select:none}
+.nav-item:hover{background:#22304a}
+.nav-item.active{background:var(--accent);color:#fff;font-weight:700}
+.nav-item .ic{width:18px;text-align:center}
+#roleBox{margin-top:auto;padding:14px 16px;border-top:1px solid #26324a;font-size:12px;color:var(--sidebar-muted)}
+#roleBox select{width:100%;margin-top:6px;background:#22304a;color:#fff;border:1px solid #3a4a68;border-radius:6px;padding:6px}
+
+/* ===== Cards & KPI ===== */
+.card{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.card h3{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card h3 .sub{font-size:12px;color:var(--text-muted);font-weight:400}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card-bg);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.kpi .k-label{font-size:12px;color:var(--text-muted)}
+.kpi .k-value{font-size:24px;font-weight:800;margin-top:4px}
+.kpi .k-note{font-size:12px;margin-top:4px;color:var(--text-muted)}
+.kpi.good .k-value{color:var(--ok)}
+.kpi.warn .k-value{color:var(--warn)}
+.kpi.bad .k-value{color:var(--bad)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid2 .card{margin-bottom:0}
+@media(max-width:1000px){.grid2{grid-template-columns:1fr}}
+
+/* ===== Tables ===== */
+.tbl-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{background:#f4f6f9;text-align:left;padding:8px 10px;border-bottom:2px solid var(--line);color:#3a4a5c;white-space:nowrap;font-size:12.5px}
+.tbl td{padding:8px 10px;border-bottom:1px solid #e8ecf1;vertical-align:middle}
+.tbl tr:hover td{background:#f8fafc}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl .center{text-align:center}
+.t-red{color:var(--bad);font-weight:700}
+.t-green{color:var(--ok);font-weight:700}
+.t-orange{color:var(--warn);font-weight:700}
+.t-muted{color:var(--text-muted)}
+.empty{padding:24px;text-align:center;color:var(--text-muted)}
+
+/* ===== Badges ===== */
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap}
+.b-gray{background:#e7ebf0;color:#41506a}
+.b-red{background:#fdeaea;color:#a02020}
+.b-green{background:#e2f3e9;color:#166534}
+.b-orange{background:#fdf0dd;color:#8a5200}
+.b-blue{background:#e3edf9;color:#174e85}
+
+/* ===== Buttons & forms ===== */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--text);font-size:13px;cursor:pointer;font-family:inherit;font-weight:600}
+.btn:hover{background:#f2f5f8}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-dark)}
+.btn.small{padding:3px 9px;font-size:12px;border-radius:6px}
+.btn.ghost-red{color:var(--bad);border-color:#eec7c7}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.toolbar .spacer{flex:1}
+input,select,textarea{font-family:inherit;font-size:13.5px;padding:7px 10px;border:1px solid #c3ccd8;border-radius:8px;background:#fff;color:var(--text)}
+input:focus,select:focus,textarea:focus{outline:2px solid #b7cdea;border-color:var(--blue)}
+label.fl{display:block;font-size:12.5px;color:var(--text-muted);margin-bottom:4px;font-weight:600}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.form-grid .full{grid-column:1/-1}
+.form-row{margin-bottom:12px}
+.hint{font-size:12px;color:var(--text-muted);margin-top:4px}
+
+/* ===== Modal ===== */
+#modalMask{position:fixed;inset:0;background:rgba(12,18,28,.55);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+#modalMask.show{display:flex}
+#modalBox{background:#fff;border-radius:12px;width:100%;max-width:760px;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#modalBox h2{font-size:16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
+#modalBox .x{cursor:pointer;font-size:20px;color:var(--text-muted);border:none;background:none}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+
+/* ===== Toast ===== */
+#toastBox{position:fixed;bottom:22px;right:22px;z-index:400;display:flex;flex-direction:column;gap:8px}
+.toast{background:#17202b;color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;box-shadow:0 6px 20px rgba(0,0,0,.3);animation:tin .2s ease}
+.toast.err{background:var(--accent-dark)}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ===== Charts ===== */
+.chart-box{overflow-x:auto}
+.chart-box svg{display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);margin-top:6px}
+.legend .li{display:flex;align-items:center;gap:5px}
+.legend .dot{width:10px;height:10px;border-radius:3px}
+
+/* tabs */
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:8px 16px;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--text-muted);border-bottom:3px solid transparent;margin-bottom:-2px}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* misc */
+.alert{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.alert.warn{background:#fdf3e3;color:#7a4a00;border:1px solid #eed9b0}
+.alert.info{background:#e8f0fa;color:#173e66;border:1px solid #c3d8ef}
+.mono{font-variant-numeric:tabular-nums}
+.mini-title{font-size:12.5px;font-weight:700;color:var(--text-muted);margin:10px 0 6px}
+
+@media(max-width:820px){
+  #sidebar{width:64px}
+  #sidebar .logo{font-size:0;justify-content:center}#sidebar .logo .pot{font-size:22px}
+  #sidebar .g-title{display:none}
+  #sidebar .nav-item{justify-content:center}#sidebar .nav-item .tx{display:none}
+  #roleBox{display:none}
+  #content{padding:12px 10px 60px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="logo"><span class="pot">🍲</span><span class="tx">火鍋店 ERP</span></div>
+    <nav id="navBox"></nav>
+    <div id="roleBox">
+      目前角色
+      <select id="roleSel" onchange="App.setRole(this.value)"></select>
+    </div>
+  </aside>
+  <div id="main">
+    <div id="topbar">
+      <h1 id="pageTitle">儀表板</h1>
+      <div style="flex:1"></div>
+      <span id="todayLabel" style="font-size:13px;color:var(--text-muted)"></span>
+    </div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<div id="modalMask"><div id="modalBox"></div></div>
+<div id="toastBox"></div>
+
+<script src="js/util.js?v=13"></script>
+<script src="js/db.js?v=13"></script>
+<script src="js/seed.js?v=13"></script>
+<script src="js/domain.js?v=13"></script>
+<script src="js/sync.js?v=13"></script>
+<script src="js/ui.js?v=13"></script>
+<script src="js/app.js?v=13"></script>
+<script src="js/page_dashboard.js?v=13"></script>
+<script src="js/page_master.js?v=13"></script>
+<script src="js/page_purchase.js?v=13"></script>
+<script src="js/page_stock.js?v=13"></script>
+<script src="js/page_production.js?v=13"></script>
+<script src="js/page_orders.js?v=13"></script>
+<script src="js/page_sales.js?v=13"></script>
+<script src="js/page_reports.js?v=13"></script>
+<script src="js/page_finance.js?v=13"></script>
+<script src="js/page_settings.js?v=13"></script>
+</body>
+</html>
