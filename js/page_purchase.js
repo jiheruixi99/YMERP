@@ -1,0 +1,397 @@
+/* ===== page_purchase.js — 採購/進貨驗收/價格趨勢/採購建議 ===== */
+"use strict";
+
+const PagePurchase = {
+  poLines: [],
+  trendIng: "i_cabbage",
+
+  /* ---------------- 進貨登記(每天 Key 各廠商進貨表) ---------------- */
+  renderPO(c) {
+    const grs = U.sortBy(DB.get("goodsReceipts"), g => g.date, true);
+    c.innerHTML = `
+    <div class="alert info">💡 每天 Key 各廠商的進貨表:選供應商(只列該廠商品項)→ 輸入品項/數量/單價 → 入庫。入庫後自動更新庫存、最新單價(BOM 成本跟著更新)、價格趨勢。可隨時<b>看明細、修改、刪除</b>更正。</div>
+    <div class="toolbar"><div class="spacer"></div>
+      <button class="btn primary" onclick="PagePhotoGR.open()">＋ 進貨登記</button></div>
+    <div class="card"><h3>進貨記錄</h3>
+    ${UI.table(["進貨日", "供應商", "#品項數", "#金額", "備註", "操作"],
+      grs.slice(0, 60).map(g => {
+        const amt = U.sum(g.lines, l => Math.round(l.qtyReceived * l.unitPrice));
+        return `<tr><td>${g.date}</td>
+        <td>${U.esc(UI.supName(g.supplierId))}</td>
+        <td class="num">${g.lines.length}</td>
+        <td class="num"><b>${U.fmt$(amt)}</b></td>
+        <td class="t-muted" style="font-size:12px">${U.esc(g.note || "")}</td>
+        <td><button class="btn small" onclick="PagePhotoGR.view('${g.id}')">明細</button>
+            <button class="btn small" onclick="PagePhotoGR.open('${g.id}')">修改</button>
+            <button class="btn small ghost-red" onclick="PagePhotoGR.del('${g.id}')">刪除</button></td></tr>`;
+      }), "尚無進貨記錄,點右上「＋ 進貨登記」開始")}
+    </div>`;
+  },
+
+  /* ---------------- 價格趨勢 ---------------- */
+  gotoTrend(ingId) { PagePurchase.trendIng = ingId; App.go("p_trend"); },
+
+  renderTrend(c) {
+    const ing = DB.byId("ingredients", PagePurchase.trendIng) || DB.get("ingredients")[0];
+    if (ing) PagePurchase.trendIng = ing.id;
+    const stats = ing ? Domain.priceStats(ing.id) : null;
+    const alerts = Domain.priceAlerts();
+
+    let statHtml = "";
+    let chartHtml = `<div class="empty">此品項尚無進貨價格記錄</div>`;
+    let subHtml = "";
+    if (stats) {
+      const hist90 = stats.hist.filter(h => h.date >= U.addDays(U.today(), -120));
+      chartHtml = Chart.line({
+        width: 900, height: 260,
+        series: [{ name: ing.name + " 進貨價", color: "#c62f2f", data: hist90.map(h => ({ x: U.mdLabel(h.date), y: +(h.unitPrice / 100).toFixed(1) })) }],
+        yFmt: v => "NT$" + U.fmtNum(v, 0), forceLegend: true
+      });
+      statHtml = `<div class="kpi-row">
+        <div class="kpi"><div class="k-label">最新進貨價</div><div class="k-value">${U.fmt$(stats.latest.unitPrice, 1)}</div><div class="k-note">/${U.esc(ing.stockUnit)}(${stats.latest.date})</div></div>
+        <div class="kpi ${stats.chgPrev > 0.01 ? "bad" : stats.chgPrev < -0.01 ? "good" : ""}"><div class="k-label">與前次比</div><div class="k-value">${stats.chgPrev == null ? "—" : U.pct(stats.chgPrev)}</div></div>
+        <div class="kpi ${stats.chg30 > 0.01 ? "bad" : stats.chg30 < -0.01 ? "good" : ""}"><div class="k-label">30 天漲跌</div><div class="k-value">${stats.chg30 == null ? "—" : U.pct(stats.chg30)}</div></div>
+        <div class="kpi"><div class="k-label">去年同期比</div><div class="k-value">${stats.chgYoy == null ? "—" : U.pct(stats.chgYoy)}</div><div class="k-note">${stats.chgYoy == null ? "無去年資料" : "季節波動參考"}</div></div>
+      </div>`;
+      if (stats.abnormal) {
+        const subs = Domain.substitutes(ing.id);
+        subHtml = `<div class="alert warn">⚠️ <b>${U.esc(ing.name)}</b> 價格異常(超過 ±${U.pct(DB.setting("priceAlertPct"), 0)} 閾值)。
+          ${subs.length ? "同分類價格穩定的替代方向:" + subs.map(s => `<b>${U.esc(s.ing.name)}</b>(${U.fmt$(Domain.currentPrice(s.ing.id), 1)}/${U.esc(s.ing.stockUnit)})`).join("、") : "同分類暫無穩定替代品。"}
+          可考慮調整備料配比或菜色設計。</div>`;
+      }
+    }
+
+    c.innerHTML = `
+    <div class="toolbar">
+      <label class="fl" style="margin:0">品項:</label>
+      <select onchange="PagePurchase.trendIng=this.value;App.refresh()" style="min-width:220px">${UI.ingOptions(PagePurchase.trendIng)}</select>
+      ${ing && ing.seasonal ? '<span class="badge b-blue">季節性品項</span>' : ""}
+    </div>
+    ${subHtml}${statHtml}
+    <div class="card"><h3>📈 進貨價格歷史(近 120 天)</h3>${chartHtml}</div>
+    <div class="card">
+      <h3>🚨 全品項價格異常清單</h3>
+      ${UI.table(["品項", "分類", "#最新價", "#前次比", "#30天漲跌", "#去年同期比", ""],
+        alerts.map(a => `<tr>
+          <td><b>${U.esc(a.ing.name)}</b></td>
+          <td><span class="badge b-gray">${U.esc(a.ing.category)}</span></td>
+          <td class="num">${U.fmt$(a.stats.latest.unitPrice, 1)}/${U.esc(a.ing.stockUnit)}</td>
+          <td class="num">${UI.pctBadge(a.stats.chgPrev)}</td>
+          <td class="num">${UI.pctBadge(a.stats.chg30)}</td>
+          <td class="num">${UI.pctBadge(a.stats.chgYoy)}</td>
+          <td><button class="btn small" onclick="PagePurchase.gotoTrend('${a.ing.id}')">看趨勢</button></td></tr>`),
+        "目前無價格異常品項")}
+    </div>`;
+  },
+
+  /* ---------------- 採購建議 ---------------- */
+  renderSuggest(c) {
+    const suggs = Domain.purchaseSuggestions();
+    const bySup = U.groupBy(suggs.filter(s => s.supplierId), s => s.supplierId);
+    c.innerHTML = `
+    <div class="alert info">💡 建議量 = 近 14 天日均消耗 × 備貨 ${DB.setting("coverDays")} 天 + 安全庫存 − 現有庫存,並依供應商報價自動比價。可一鍵帶入進貨登記。</div>
+    <div class="toolbar">
+      ${Object.entries(bySup).map(([supId, list]) =>
+        `<button class="btn primary" onclick="PagePurchase.createFromSuggest('${supId}')">帶入進貨:${U.esc(UI.supName(supId))}(${list.length} 項)</button>`).join("")}
+    </div>
+    <div class="card">
+    ${UI.table(["品項", "#現有庫存", "#日均消耗", "#建議採購", "最優供應商", "#最新報價", "價格提醒"],
+      suggs.map(s => `<tr>
+        <td><b>${U.esc(s.ing.name)}</b></td>
+        <td class="num">${U.fmtNum(s.stock)} ${U.esc(s.ing.stockUnit)}</td>
+        <td class="num">${U.fmtNum(s.daily)} ${U.esc(s.ing.stockUnit)}/日</td>
+        <td class="num"><b>${s.purQty} ${U.esc(s.ing.purchaseUnit)}</b></td>
+        <td>${U.esc(UI.supName(s.supplierId))}${s.prices.length > 1 ? ` <span class="badge b-green">比價 ${s.prices.length} 家</span>` : ""}</td>
+        <td class="num">${s.best ? U.fmt$(s.best.unitPrice, 1) + "/" + U.esc(s.ing.stockUnit) : U.fmt$(Domain.currentPrice(s.ing.id), 1) + "/" + U.esc(s.ing.stockUnit)}</td>
+        <td>${s.abnormal ? `<span class="badge b-red">漲價中 ${s.chg30 != null ? U.pct(s.chg30) : ""}</span> <button class="btn small" onclick="PagePurchase.gotoTrend('${s.ing.id}')">替代建議</button>` : '<span class="t-muted">正常</span>'}</td>
+      </tr>`), "目前庫存充足,無採購建議")}
+    </div>`;
+  },
+
+  createFromSuggest(supplierId) {
+    const suggs = Domain.purchaseSuggestions().filter(s => s.supplierId === supplierId);
+    const lines = suggs.map(s => ({
+      ingredientId: s.ing.id, qty: s.purQty,
+      unitPrice: Math.round((s.best ? s.best.unitPrice : Domain.currentPrice(s.ing.id)) * (s.ing.purToStock || 1)),
+      expiry: ""
+    }));
+    App.go("p_po");
+    PagePhotoGR.open(null, { supplierId, rows: lines });
+  }
+};
+
+/* ---------------- 供應商報價建檔 ----------------
+   輸入一次「食材 × 供應商 × 價格」,之後開採購單、算成本、比價全部自動帶入;
+   每次收貨驗收也會自動回寫最新價,不必重複輸入。 */
+const PageQuote = {
+  kw: "",
+  filterSup: "",
+
+  render(c) {
+    let list = DB.get("supplierPrices").map(q => ({ q, ing: DB.byId("ingredients", q.ingredientId), sup: DB.byId("suppliers", q.supplierId) }))
+      .filter(o => o.ing && o.sup);
+    if (PageQuote.kw) list = list.filter(o => o.ing.name.includes(PageQuote.kw));
+    if (PageQuote.filterSup) list = list.filter(o => o.q.supplierId === PageQuote.filterSup);
+    list = U.sortBy(list, o => o.ing.category + o.ing.name);
+
+    c.innerHTML = `
+    <div class="alert info">💡 這裡是你建檔物料的主要入口:一次填「品項 × 供應商 × 價格」,新品項可直接建立(會自動寫進食材主檔)。之後進貨自動帶價、BOM 成本自動算、多家供應商自動比價。進貨後最新價會自動回寫,平常不用回來改。</div>
+    <div class="toolbar">
+      <input placeholder="搜尋品名…" value="${U.esc(PageQuote.kw)}" oninput="PageQuote.kw=this.value" onchange="App.refresh()">
+      <select onchange="PageQuote.filterSup=this.value;App.refresh()">
+        <option value="">全部供應商</option>
+        ${DB.get("suppliers").map(s => `<option value="${s.id}" ${s.id === PageQuote.filterSup ? "selected" : ""}>${U.esc(s.name)}</option>`).join("")}
+      </select>
+      <div class="spacer"></div>
+      <button class="btn" onclick="PageSup.edit()">＋ 新增供應商</button>
+      <button class="btn primary" onclick="PageQuote.edit()">＋ 建檔品項/報價</button>
+    </div>
+    <div class="card">
+    ${UI.table(["品項", "分類", "供應商", "#報價(計價單位)", "生效日", "#最新進貨價", "比價", "操作"],
+      list.map(o => {
+        const cur = Domain.currentPrice(o.ing.id);
+        const others = DB.get("supplierPrices").filter(x => x.ingredientId === o.ing.id && x.id !== o.q.id);
+        const isBest = !others.some(x => x.unitPrice < o.q.unitPrice);
+        return `<tr>
+          <td><b>${U.esc(o.ing.name)}</b></td>
+          <td><span class="badge b-gray">${U.esc(o.ing.category)}</span></td>
+          <td>${U.esc(o.sup.name)}</td>
+          <td class="num"><b>${U.fmt$(o.q.unitPrice, 1)}</b>/${U.esc(o.ing.stockUnit)}</td>
+          <td>${o.q.effectiveDate || "—"}</td>
+          <td class="num">${cur ? U.fmt$(cur, 1) : "—"}</td>
+          <td>${others.length ? (isBest ? '<span class="badge b-green">最低價</span>' : '<span class="badge b-orange">有更低價</span>') : '<span class="t-muted">單一</span>'}</td>
+          <td><button class="btn small" onclick="PageQuote.edit('${o.q.id}')">改價</button>
+              <button class="btn small" onclick="PageIng.edit('${o.ing.id}')">品項設定</button>
+              <button class="btn small ghost-red" onclick="PageQuote.del('${o.q.id}')">刪除</button></td>
+        </tr>`;
+      }), "尚無建檔,點右上「＋ 建檔品項/報價」開始")}
+    </div>`;
+  },
+
+  edit(id, presetIngId) {
+    const q = id ? DB.byId("supplierPrices", id) : { effectiveDate: U.today(), ingredientId: presetIngId || "" };
+    const ing = DB.byId("ingredients", q.ingredientId);
+    UI.modal(id ? "修改報價" : "建檔品項 / 報價", `
+      <div class="form-grid">
+        <div class="full"><label class="fl">食材品項 *</label>
+          <div style="display:flex;gap:8px">
+            <select id="q_ing" style="flex:1" onchange="PageQuote.unitHint()" ${id ? "disabled" : ""}>${UI.ingOptions(q.ingredientId)}</select>
+            ${id ? "" : `<button class="btn small" onclick="PageQuote.newIng()">＋ 新品項</button>`}
+          </div></div>
+        <div class="full"><label class="fl">供應商 *</label>
+          <select id="q_sup" style="width:100%" ${id ? "disabled" : ""}>${UI.supOptions(q.supplierId)}</select></div>
+        <div><label class="fl">報價(元 / 計價單位)*</label><input id="q_price" type="number" step="any" value="${q.unitPrice ? q.unitPrice / 100 : ((ing && ing.basePrice) ? ing.basePrice / 100 : "")}" style="width:100%"></div>
+        <div><label class="fl">生效日</label><input id="q_date" type="date" value="${q.effectiveDate || U.today()}" style="width:100%"></div>
+      </div>
+      <p class="hint" id="q_hint"></p>`,
+      {
+        onOk() {
+          const ingId = id ? q.ingredientId : UI.val("q_ing");
+          const supId = id ? q.supplierId : UI.val("q_sup");
+          const price = U.toCents(UI.val("q_price"));
+          if (!ingId || !supId || price <= 0) { UI.toast("請選擇品項、供應商並輸入報價", true); return false; }
+          const patch = { supplierId: supId, ingredientId: ingId, unitPrice: price, effectiveDate: UI.val("q_date") || U.today() };
+          if (id) DB.update("supplierPrices", id, patch);
+          else {
+            const dup = DB.get("supplierPrices").find(x => x.supplierId === supId && x.ingredientId === ingId);
+            if (dup) DB.update("supplierPrices", dup.id, patch);
+            else DB.insert("supplierPrices", patch);
+          }
+          UI.toast("已建檔,進貨/成本計算自動帶入");
+          App.refresh();
+        }
+      });
+    PageQuote.unitHint();
+  },
+
+  // 內建新增食材主檔,建好後回到報價視窗並自動選取
+  newIng() {
+    const supId = UI.val("q_sup");
+    UI.closeModal();
+    PageIng.edit(null, {
+      supplierId: supId,
+      onDone(ing) {
+        PageQuote.edit(null, ing.id);
+        const el = document.getElementById("q_sup");
+        if (el && supId) el.value = supId;
+        PageQuote.unitHint();
+      }
+    });
+  },
+
+  unitHint() {
+    const el = document.getElementById("q_hint");
+    if (!el) return;
+    const ing = DB.byId("ingredients", UI.val("q_ing"));
+    if (!ing) { el.textContent = "選現有品項,或按「＋ 新品項」建立(會一併寫入食材主檔)。"; return; }
+    el.innerHTML = `此品項計價單位「${U.esc(ing.stockUnit)}」,報價即每 ${U.esc(ing.stockUnit)} 的價格;配方換算 1${U.esc(ing.stockUnit)} = ${U.fmtNum(ing.stockToUse)}${U.esc(ing.useUnit)}。`;
+  },
+
+  del(id) { UI.confirm("確定刪除此報價?", () => { DB.remove("supplierPrices", id); App.refresh(); }); }
+};
+
+/* ---------------- 進貨登記(照片可對照 + 手動輸入 → 入庫;可修改/刪除) ---------------- */
+const PagePhotoGR = {
+  rows: [],
+  editId: null,   // 修改中的進貨單 id
+
+  // open() 新增 / open(grId) 修改 / open(null,{supplierId,rows}) 帶入預填
+  open(grId, preset) {
+    PagePhotoGR.editId = grId || null;
+    const gr = grId ? DB.byId("goodsReceipts", grId) : null;
+    const supId = gr ? gr.supplierId : (preset ? preset.supplierId : "");
+    const date = gr ? gr.date : U.today();
+    PagePhotoGR.rows = gr
+      ? gr.lines.map(l => ({ ingredientId: l.ingredientId, qty: l.qtyReceived, unitPrice: l.unitPrice, expiry: l.expiry || "" }))
+      : (preset && preset.rows ? JSON.parse(JSON.stringify(preset.rows)) : []);
+    UI.modal(grId ? "修改進貨單" : "進貨登記", `
+      <div class="form-grid">
+        <div><label class="fl">供應商 *(選了只列該廠商品項)</label><select id="pg_sup" style="width:100%" onchange="PagePhotoGR.renderRows()">${UI.supOptions(supId)}</select></div>
+        <div><label class="fl">進貨日期</label><input id="pg_date" type="date" value="${date}" style="width:100%"></div>
+        <div class="full">
+          <label class="fl">送貨單照片(選填,只顯示在旁邊對照,不上傳、不收費)</label>
+          <input type="file" accept="image/*" capture="environment" onchange="PagePhotoGR.readImage(this)">
+        </div>
+      </div>
+      <div id="pg_preview" style="margin:10px 0"></div>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn primary small" onclick="PagePhotoGR.addRow()">＋ 加一列</button>
+        <span class="hint">選品項自動帶入建檔價;單價 = 每計價單位(公斤/箱/包…),價格浮動直接改</span>
+      </div>
+      <div id="pg_rows"></div>
+      <p class="hint" style="margin-top:8px">確認入庫後:自動加庫存批號(效期依品項效期天數帶入)、寫入最新單價(BOM 成本跟著更新)、更新報價建檔。</p>`,
+      {
+        width: 920, okText: grId ? "✅ 儲存修改" : "✅ 確認入庫",
+        onOk() { return PagePhotoGR.post(); }
+      });
+    if (!PagePhotoGR.rows.length) PagePhotoGR.addRow();
+    else PagePhotoGR.renderRows();
+  },
+
+  view(grId) {
+    const g = DB.byId("goodsReceipts", grId);
+    if (!g) return;
+    const amt = U.sum(g.lines, l => Math.round(l.qtyReceived * l.unitPrice));
+    UI.modal("進貨明細 — " + g.date + "(" + UI.supName(g.supplierId) + ")",
+      UI.table(["品項", "#數量", "#單價", "#小計", "效期"],
+        g.lines.map(l => {
+          const ing = DB.byId("ingredients", l.ingredientId);
+          return `<tr><td>${U.esc(UI.ingName(l.ingredientId))}</td>
+          <td class="num">${U.fmtNum(l.qtyReceived)} ${ing ? U.esc(ing.stockUnit) : ""}</td>
+          <td class="num">${U.fmt$(l.unitPrice)}</td>
+          <td class="num">${U.fmt$(Math.round(l.qtyReceived * l.unitPrice))}</td>
+          <td>${l.expiry || "—"}</td></tr>`;
+        })) + `<p style="text-align:right;margin-top:8px;font-weight:700">合計 ${U.fmt$(amt)}</p>`,
+      { hideOk: true, width: 640 });
+  },
+
+  del(grId) {
+    UI.confirm("確定刪除此進貨單?會一併回沖它建立的庫存與價格記錄(尚未消耗的批號)。", () => {
+      Domain.reverseGoodsReceipt(grId);
+      DB.remove("goodsReceipts", grId);
+      UI.toast("已刪除進貨單並回沖庫存");
+      App.refresh();
+    });
+  },
+
+  readImage(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, 1400 / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      const pv = document.getElementById("pg_preview");
+      if (pv) pv.innerHTML = `<img src="${cv.toDataURL("image/jpeg", 0.85)}" style="max-width:100%;max-height:340px;border:1px solid var(--line);border-radius:8px">`;
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  },
+
+  addRow() {
+    PagePhotoGR.rows.push({ rawName: "", ingredientId: "", qty: 1, unitPrice: 0, expiry: "" });
+    PagePhotoGR.renderRows();
+  },
+
+  renderRows() {
+    const box = document.getElementById("pg_rows");
+    if (!box) return;
+    if (!PagePhotoGR.rows.length) {
+      box.innerHTML = `<div class="empty" style="padding:14px">尚無明細 — 點「＋ 加一列」開始輸入</div>`;
+      return;
+    }
+    const supId = UI.val("pg_sup");
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>品項 *</th><th class="num">數量</th><th class="num">單價(元/計價單位)</th><th>效期</th><th></th></tr></thead>
+      <tbody>` + PagePhotoGR.rows.map((r, idx) => {
+        const ing = DB.byId("ingredients", r.ingredientId);
+        return `<tr style="${r.ingredientId ? "" : "background:#fdf3e3"}">
+          <td><select style="min-width:200px" onchange="PagePhotoGR.setRow(${idx},'ingredientId',this.value)">${UI.ingOptionsBySupplier(supId, r.ingredientId)}</select></td>
+          <td class="num"><input type="number" step="any" value="${r.qty}" style="width:80px" oninput="PagePhotoGR.rows[${idx}].qty=parseFloat(this.value)||0">${ing ? " " + U.esc(ing.stockUnit) : ""}</td>
+          <td class="num"><input type="number" step="any" value="${r.unitPrice ? r.unitPrice / 100 : ""}" style="width:90px" oninput="PagePhotoGR.rows[${idx}].unitPrice=Math.round((parseFloat(this.value)||0)*100)"></td>
+          <td><input type="date" value="${r.expiry || ""}" style="width:135px" onchange="PagePhotoGR.rows[${idx}].expiry=this.value"></td>
+          <td><button class="btn small ghost-red" onclick="PagePhotoGR.rows.splice(${idx},1);PagePhotoGR.renderRows()">✕</button></td>
+        </tr>`;
+      }).join("") + `</tbody></table></div>
+      <p class="hint" style="margin-top:6px">合計:${U.fmt$(U.sum(PagePhotoGR.rows, r => Math.round(r.qty * r.unitPrice)))}(橘底列=尚未對應品項,不會入庫)</p>`;
+  },
+
+  setRow(idx, key, val) {
+    PagePhotoGR.rows[idx][key] = val;
+    if (key === "ingredientId") {
+      const ing = DB.byId("ingredients", val);
+      if (ing) {
+        if (!PagePhotoGR.rows[idx].expiry && ing.shelfLifeDays < 999)
+          PagePhotoGR.rows[idx].expiry = U.addDays(UI.val("pg_date") || U.today(), ing.shelfLifeDays);
+        // 自動帶入該供應商的建檔價(每計價單位),可再手動修改
+        if (!PagePhotoGR.rows[idx].unitPrice) {
+          const supId = UI.val("pg_sup");
+          const quote = supId ? U.sortBy(DB.get("supplierPrices").filter(q => q.supplierId === supId && q.ingredientId === val), q => q.effectiveDate, true)[0] : null;
+          PagePhotoGR.rows[idx].unitPrice = quote ? quote.unitPrice : Domain.currentPrice(val);
+        }
+      }
+    }
+    PagePhotoGR.renderRows();
+  },
+
+  post() {
+    const supplierId = UI.val("pg_sup");
+    if (!supplierId) { UI.toast("請選擇供應商", true); return false; }
+    const date = UI.val("pg_date") || U.today();
+    const valid = PagePhotoGR.rows.filter(r => r.ingredientId && r.qty > 0);
+    if (!valid.length) { UI.toast("沒有可入庫的明細(需對應品項且數量>0)", true); return false; }
+    // 修改:先回沖舊進貨單
+    const grId = PagePhotoGR.editId || U.uid("gr");
+    if (PagePhotoGR.editId) Domain.reverseGoodsReceipt(grId);
+    const grLines = [];
+    for (const r of valid) {
+      const ing = DB.byId("ingredients", r.ingredientId);
+      // 數量與單價皆以「計價單位」(=庫存單位)直接計
+      const stockUnitPrice = r.unitPrice;
+      const batchNo = "P" + date.replace(/-/g, "") + "-" + ing.name.slice(0, 2);
+      Domain.addStock(ing.id, r.qty, date, r.expiry || null, batchNo, "進貨", "進貨", grId, stockUnitPrice);
+      if (stockUnitPrice > 0) {
+        DB.insert("priceHistory", { ingredientId: ing.id, supplierId, unitPrice: stockUnitPrice, date, grId });
+        const q = DB.get("supplierPrices").find(x => x.supplierId === supplierId && x.ingredientId === ing.id);
+        if (q) DB.update("supplierPrices", q.id, { unitPrice: stockUnitPrice, effectiveDate: date });
+        else DB.insert("supplierPrices", { supplierId, ingredientId: ing.id, unitPrice: stockUnitPrice, effectiveDate: date });
+      }
+      grLines.push({ ingredientId: ing.id, qtyReceived: r.qty, unitPrice: r.unitPrice, batchNo, expiry: r.expiry || null });
+    }
+    const rec = { id: grId, date, lines: grLines, source: "manual", supplierId };
+    if (PagePhotoGR.editId) DB.update("goodsReceipts", grId, rec);
+    else DB.insert("goodsReceipts", rec);
+    UI.toast(PagePhotoGR.editId ? "進貨單已修改" : `進貨完成:${grLines.length} 品項已入庫`);
+    PagePhotoGR.editId = null;
+    App.refresh();
+  }
+};
+
+App.register("p_po", "供應鏈 — 進貨登記", PagePurchase.renderPO);
+App.register("p_quote", "供應鏈 — 供應商報價建檔", PageQuote.render);
+App.register("p_trend", "供應鏈 — 食材價格趨勢", PagePurchase.renderTrend);
+App.register("p_sugg", "供應鏈 — 採購建議(比價)", PagePurchase.renderSuggest);
