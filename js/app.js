@@ -17,7 +17,7 @@ const App = {
     {
       group: "主檔", items: [
         ["m_ing", "🥬", "食材品項"], ["m_sup", "🚚", "供應商"],
-        ["m_rcp", "📖", "配方(BOM)"], ["m_plan", "🎫", "人頭價方案"]]
+        ["m_rcp", "📖", "配方(BOM)"], ["m_plan", "🎫", "菜單價格"]]
     },
     {
       group: "供應鏈 MM", items: [

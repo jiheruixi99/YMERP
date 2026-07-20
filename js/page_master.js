@@ -61,19 +61,29 @@ const PageIng = {
       </div>
       <div class="mini-title">💰 計價 — 你怎麼買、怎麼算錢</div>
       <div class="form-grid">
-        <div><label class="fl">計價單位</label>
-          <input id="f_su" value="${U.esc(i.stockUnit)}" list="f_units" style="width:100%" onchange="PageIng.autoConv()">
+        <div><label class="fl">計價單位(整箱/整包買的單位)</label>
+          <input id="f_su" value="${U.esc(i.stockUnit)}" list="f_units" style="width:100%" oninput="PageIng.onSuChange()">
           <datalist id="f_units"><option>公斤</option><option>斤</option><option>克</option><option>包</option><option>箱</option><option>桶</option><option>罐</option><option>瓶</option><option>盒</option></datalist></div>
-        <div><label class="fl">參考單價(元 / 計價單位)</label><input id="f_price" type="number" step="any" value="${(i.basePrice || 0) / 100}" style="width:100%"></div>
+        <div><label class="fl">參考單價(元 / 計價單位)</label><input id="f_price" type="number" step="any" value="${(i.basePrice || 0) / 100}" style="width:100%" oninput="PageIng.updateCalc()"></div>
         <div><label class="fl">安全庫存(計價單位)</label><input id="f_safe" type="number" step="any" value="${i.safetyStock}" style="width:100%"></div>
       </div>
       <div class="mini-title">🍲 配方換算 — 做菜(BOM)怎麼算用量</div>
       <div class="form-grid">
-        <div><label class="fl">配方單位</label>
-          <input id="f_uu" value="${U.esc(i.useUnit)}" list="f_useunits" style="width:100%">
-          <datalist id="f_useunits"><option>克</option><option>份</option><option>杯</option><option>包</option></datalist></div>
-        <div><label class="fl">1 計價單位 = ? 配方單位</label><input id="f_s2u" type="number" step="any" value="${i.stockToUse}" style="width:100%"></div>
+        <div><label class="fl">配方單位(BOM 裡實際用的單位)</label>
+          <input id="f_uu" value="${U.esc(i.useUnit)}" list="f_useunits" style="width:100%" oninput="PageIng.updateCalc()">
+          <datalist id="f_useunits"><option>克</option><option>份</option><option>杯</option><option>包</option><option>片</option><option>顆</option></datalist></div>
+        <div><label class="fl">★ 每個計價單位裡有幾個配方單位?</label>
+          <input id="f_s2u" type="number" step="any" value="${i.stockToUse}" style="width:100%" oninput="PageIng.updateCalc()"></div>
       </div>
+      <div style="margin-top:6px;padding:10px 12px;border:1px dashed #c3ccd8;border-radius:8px">
+        <div class="mini-title" style="margin:0 0 6px">🧮 有兩層包裝?(例:一箱 48 罐、每罐 400 克)幫你乘出來</div>
+        <div class="form-grid">
+          <div><label class="fl">小單位數量(幾罐/幾包)</label><input id="f_pk_n" type="number" step="any" placeholder="例:48" style="width:100%" oninput="PageIng.applyPack()"></div>
+          <div><label class="fl">每小單位含幾個配方單位(如每罐幾克)</label><input id="f_pk_g" type="number" step="any" placeholder="例:400" style="width:100%" oninput="PageIng.applyPack()"></div>
+        </div>
+        <p class="hint" style="margin:6px 0 0">填這兩格會自動幫你把上面「每個計價單位裡有幾個配方單位」乘出來(48×400=19200),不用自己算。單層包裝(例:一箱 10 公斤)不用理這區。</p>
+      </div>
+      <div id="f_convcalc" style="margin:10px 0;padding:10px 14px;background:#e8f0fa;border-radius:8px;font-size:13.5px"></div>
       <p class="hint" id="f_convhint"></p>
       <div class="mini-title">其他</div>
       <div class="form-grid">
@@ -103,20 +113,52 @@ const PageIng = {
           if (opts.onDone) setTimeout(() => opts.onDone(ing), 0); else App.refresh();
         }
       });
-    PageIng.autoConv();
+    PageIng.updateCalc();
   },
 
-  // 選了公斤/斤等重量單位 → 自動填「1計價單位=?克」的換算 + 顯示範例
-  autoConv() {
+  // 計價單位改變時:若是重量單位(公斤/斤/克)自動帶入配方單位=克+換算數字;其他單位(箱/包…)不猜,留給你自己填
+  onSuChange() {
     const su = UI.val("f_su");
-    const el = document.getElementById("f_convhint");
+    const uu = document.getElementById("f_uu");
     const conv = document.getElementById("f_s2u");
-    if (UNIT_TO_GRAM[su] && document.getElementById("f_uu")) {
-      document.getElementById("f_uu").value = "克";
-      if (conv && (!conv.value || conv.value === "1" || conv.value === "600" || conv.value === "1000"))
-        conv.value = UNIT_TO_GRAM[su];
+    if (UNIT_TO_GRAM[su]) {
+      if (uu) uu.value = "克";
+      if (conv) conv.value = UNIT_TO_GRAM[su];
     }
-    if (el) el.innerHTML = `範例:牛培根 計價單位「公斤」、單價 400、來 11.5 公斤就進 11.5;配方用「克」→ 1公斤=1000克,BOM 填 200 克即算 NT$80。<b>斤=600克、公斤=1000克</b>(菜品可註記在備註)。`;
+    PageIng.updateCalc();
+  },
+
+  // 兩層包裝小算盤:小單位數量 × 每小單位含幾個配方單位 → 自動帶入「每個計價單位裡有幾個配方單位」
+  applyPack() {
+    const n = UI.num("f_pk_n"), g = UI.num("f_pk_g");
+    const conv = document.getElementById("f_s2u");
+    if (n > 0 && g > 0 && conv) conv.value = n * g;
+    PageIng.updateCalc();
+  },
+
+  // 即時算給你看:單價 ÷ 換算數字 = 每個配方單位多少錢(有填小算盤時,額外顯示每小單位多少錢)
+  updateCalc() {
+    const price = UI.num("f_price");     // 元/計價單位
+    const n = UI.num("f_s2u");           // 每計價單位含幾個配方單位
+    const su = UI.val("f_su") || "計價單位", uu = UI.val("f_uu") || "配方單位";
+    const pkN = UI.num("f_pk_n"), pkG = UI.num("f_pk_g");
+    const calcEl = document.getElementById("f_convcalc");
+    if (calcEl) {
+      if (price > 0 && n > 0) {
+        const perUnit = price / n;
+        const packLine = (pkN > 0 && pkG > 0)
+          ? `<br>= 每 1${U.esc(su)}含 ${pkN} 個小單位 → 每小單位約 <b class="t-green">NT$${(price / pkN).toFixed(2)}</b>(每小單位再拆 ${pkG} 個「${U.esc(uu)}」)`
+          : "";
+        calcEl.innerHTML = `📐 換算結果:1${U.esc(su)} NT$${price} ÷ ${n} = 每 <b>1${U.esc(uu)}</b> 約 <b class="t-green" style="font-size:15px">NT$${perUnit.toFixed(2)}</b>${packLine}
+          <br><span class="hint" style="margin:0">之後 BOM 表只要填用幾個「${U.esc(uu)}」,系統就自動算出成本(例:填 200 → NT$${(perUnit * 200).toFixed(1)})。</span>`;
+      } else {
+        calcEl.innerHTML = `<span class="t-muted">填好上面「參考單價」和「每個計價單位裡有幾個配方單位」,這裡會即時算給你看每個配方單位多少錢。</span>`;
+      }
+    }
+    const el = document.getElementById("f_convhint");
+    if (el) el.innerHTML = `範例①秤重類:牛培根計價單位「公斤」、單價400 → 選公斤會自動帶「1公斤=1000克」,算出每克NT$0.4,BOM填200克即NT$80。
+      範例②計件類:王子麵一箱40包、單價200 → 計價單位填「箱」、配方單位填「包」、換算數字填 <b>40</b> → 算出每包NT$5。
+      <b>斤=600克、公斤=1000克</b>(菜品可註記在備註)。`;
   },
 
   del(id) {
@@ -276,14 +318,27 @@ const PageRcp = {
           ${l.kind === "ing" ? UI.ingOptions(l.refId) : UI.recipeOptions(l.refId, excludeId)}
         </select>
         <input type="number" step="any" style="width:90px" value="${l.qty || ""}" placeholder="數量"
-          oninput="PageRcp.editLines[${idx}].qty=parseFloat(this.value)||0;PageRcp.renderLines('${excludeId || ""}')">
+          oninput="PageRcp.updateLineQty(${idx}, this.value, '${excludeId || ""}')">
         <span style="width:44px;font-size:12px;color:var(--text-muted)">${U.esc(unitLabel)}</span>
-        <span style="width:80px;text-align:right;font-size:12.5px;font-weight:700">${cost ? U.fmt$(cost, 1) : "—"}</span>
+        <span id="rl_cost_${idx}" style="width:80px;text-align:right;font-size:12.5px;font-weight:700">${cost ? U.fmt$(cost, 1) : "—"}</span>
         <button class="btn small ghost-red" onclick="PageRcp.editLines.splice(${idx},1);PageRcp.renderLines('${excludeId || ""}')">✕</button>
       </div>`;
     }).join("") || `<div class="empty" style="padding:10px">尚無用料,請點下方按鈕新增</div>`;
     const total = U.sum(PageRcp.editLines, l => PageRcp.lineCost(l));
-    box.innerHTML += `<div style="text-align:right;margin-top:8px;font-size:13px">整批成本 <b>${U.fmt$(total)}</b>　÷ ${yq} 份 = 每份 <b class="t-green">${U.fmt$(Math.round(total / yq), 1)}</b></div>`;
+    box.innerHTML += `<div id="rl_total" style="text-align:right;margin-top:8px;font-size:13px">整批成本 <b>${U.fmt$(total)}</b>　÷ ${yq} 份 = 每份 <b class="t-green">${U.fmt$(Math.round(total / yq), 1)}</b></div>`;
+  },
+
+  // qty 輸入時只更新該行成本+總計文字,不整塊重繪,避免輸入到一半游標被重置
+  updateLineQty(idx, val, excludeId) {
+    PageRcp.editLines[idx].qty = parseFloat(val) || 0;
+    const l = PageRcp.editLines[idx];
+    const cost = PageRcp.lineCost(l);
+    const costEl = document.getElementById(`rl_cost_${idx}`);
+    if (costEl) costEl.textContent = cost ? U.fmt$(cost, 1) : "—";
+    const yq = UI.num("f_yq") || 1;
+    const total = U.sum(PageRcp.editLines, x => PageRcp.lineCost(x));
+    const totalEl = document.getElementById("rl_total");
+    if (totalEl) totalEl.innerHTML = `整批成本 <b>${U.fmt$(total)}</b>　÷ ${yq} 份 = 每份 <b class="t-green">${U.fmt$(Math.round(total / yq), 1)}</b>`;
   },
 
   collectLines() { /* 值已由 oninput/onchange 即時寫回 editLines */ },
@@ -299,10 +354,11 @@ const PageRcp = {
 };
 App.register("m_rcp", "主檔 — 配方 / BOM", PageRcp.render);
 
-/* ---------------- 人頭價方案 ---------------- */
+/* ---------------- 菜單價格(人頭價/共鍋費方案) ---------------- */
 const PagePlan = {
   render(c) {
     c.innerHTML = `
+    <div class="alert info">💡 這裡是「菜單價格」主檔,主要給每日營收頁的「來客數→營收計算」用。若你要讓「點餐明細」上傳時能自動比對成本,幼稚園/國小/國中/成人共鍋費這幾項還需要到「配方(BOM)」頁另外各建一筆同名配方(可以是空的/0成本),系統才知道怎麼展開用料。</div>
     <div class="toolbar"><div class="spacer"></div>
       <button class="btn primary" onclick="PagePlan.edit()">＋ 新增方案</button></div>
     <div class="card">
@@ -318,12 +374,12 @@ const PagePlan = {
     </div>`;
   },
   edit(id) {
-    const p = id ? DB.byId("pricePlans", id) : { dayType: "平日", tier: "成人", active: true };
+    const p = id ? DB.byId("pricePlans", id) : { dayType: "平日", tier: "成人共鍋費", active: true };
     UI.modal(id ? "編輯方案" : "新增方案", `
       <div class="form-grid">
-        <div><label class="fl">方案名稱 *</label><input id="f_name" value="${U.esc(p.name || "")}" style="width:100%"></div>
+        <div><label class="fl">方案名稱 *(建議跟 POS 點餐明細上的商品名稱一致,方便你之後對照)</label><input id="f_name" value="${U.esc(p.name || "")}" style="width:100%"></div>
         <div><label class="fl">適用日</label><select id="f_day" style="width:100%">${["平日", "假日", "全時段"].map(x => `<option ${x === p.dayType ? "selected" : ""}>${x}</option>`).join("")}</select></div>
-        <div><label class="fl">客層</label><select id="f_tier" style="width:100%">${["成人", "兒童", "敬老", "加購"].map(x => `<option ${x === p.tier ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+        <div><label class="fl">客層</label><select id="f_tier" style="width:100%">${["幼稚園共鍋費", "國小共鍋費", "國中共鍋費", "成人共鍋費"].map(x => `<option ${x === p.tier ? "selected" : ""}>${x}</option>`).join("")}</select></div>
         <div><label class="fl">價格(元)</label><input id="f_price" type="number" step="any" value="${(p.price || 0) / 100}" style="width:100%"></div>
         <div><label class="fl">啟用</label><label style="display:flex;align-items:center;gap:6px;padding:7px 0"><input type="checkbox" id="f_active" ${p.active ? "checked" : ""}> 啟用中</label></div>
       </div>`,
@@ -338,4 +394,4 @@ const PagePlan = {
   },
   del(id) { UI.confirm("確定刪除此方案?", () => { DB.remove("pricePlans", id); App.refresh(); }); }
 };
-App.register("m_plan", "主檔 — 人頭價方案", PagePlan.render);
+App.register("m_plan", "主檔 — 菜單價格", PagePlan.render);

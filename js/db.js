@@ -50,7 +50,7 @@ const DB = {
         return;
       }
     } catch (e) { console.error("DB 載入失敗", e); }
-    DB.reset(true);
+    DB.reset(false);
   },
 
   reset(withSeed) {

@@ -260,15 +260,15 @@ const PageSales = {
     PageSales.renderRecon();
   },
 
-  /* ---- 來客數計算:輸入各客層人數 → 依人頭價方案自動算營收 ---- */
+  /* ---- 來客數計算:輸入各客層人數 → 依菜單價格自動算營收 ---- */
   calc() {
-    UI.modal("🧮 來客數 → 營收計算(依人頭價方案)", `
+    UI.modal("🧮 來客數 → 營收計算(依菜單價格)", `
       <div class="form-grid">
         <div><label class="fl">日期</label><input id="cal_date" type="date" value="${U.today()}" onchange="PageSales.calcInputs()" style="width:100%"></div>
         <div><label class="fl">加購金額(元,飲料/酒水等)</label><input id="cal_addon" type="number" step="any" value="0" oninput="PageSales.calcUpdate()" style="width:100%"></div>
         <div><label class="fl">實際營業額(元,選填 → 比對差異)</label><input id="cal_actual" type="number" step="any" oninput="PageSales.calcUpdate()" style="width:100%"></div>
       </div>
-      <div class="mini-title">各客層人數(依「人頭價方案」主檔自動列出)</div>
+      <div class="mini-title">各客層人數(依「菜單價格」主檔自動列出)</div>
       <div id="calPlans"></div>
       <div id="calOut" style="margin-top:12px"></div>`,
       {
@@ -306,7 +306,7 @@ const PageSales = {
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
         <span style="flex:1">${U.esc(p.name)} <span class="t-muted">(${U.fmt$(p.price)}/位)</span></span>
         <input id="cal_n_${p.id}" type="number" min="0" placeholder="0" style="width:100px" oninput="PageSales.calcUpdate()"> 位
-      </div>`).join("") : `<div class="alert warn">沒有適用的人頭價方案,請先到「主檔 → 人頭價方案」建立。</div>`);
+      </div>`).join("") : `<div class="alert warn">沒有適用的菜單價格,請先到「主檔 → 菜單價格」建立。</div>`);
     PageSales.calcUpdate();
   },
 
