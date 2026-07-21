@@ -30,6 +30,12 @@ const Sync = {
 
   hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h; },
 
+  /* ---- 進貨照片雲端(存 Google 雲端硬碟,跨裝置可看) ---- */
+  async savePhoto(grId, dataUrl) { return Sync.call("savePhoto", { grId, dataUrl }); },
+  async getPhoto(grId) { const j = await Sync.call("getPhoto", { grId }); return j.dataUrl || ""; },
+  async deletePhoto(grId) { return Sync.call("deletePhoto", { grId }); },
+  async listPhotos() { const j = await Sync.call("listPhotos", {}); return j.ids || []; },
+
   /* ---- 上傳(只推有變更的資料表;force=true 全部重推) ---- */
   async push(force) {
     const last = force ? {} : JSON.parse(localStorage.getItem(PUSH_HASH_KEY) || "{}");

@@ -1,6 +1,42 @@
 /* ===== page_purchase.js — 採購/進貨驗收/價格趨勢/採購建議 ===== */
 "use strict";
 
+/* 進貨照片本機儲存(存瀏覽器 localStorage,不進 DB.data、不同步到試算表
+   —— 照片體積大,放進 Google 試算表會超過單格上限並拖慢同步,故只留在本機供事後核對)。
+   有容量上限,超過時自動丟掉最舊的照片(保留最近的進貨照片)。 */
+const GRPhoto = {
+  KEY: "hotpot_erp_grPhotos",
+  BUDGET: 3500000, // 約 3.5MB 給照片用
+  _load() { try { return JSON.parse(localStorage.getItem(GRPhoto.KEY) || "{}"); } catch (e) { return {}; } },
+  get(grId) { return GRPhoto._load()[grId] || null; },
+  set(grId, dataUrl) {
+    if (!dataUrl) { GRPhoto.remove(grId); return; }
+    const map = GRPhoto._load();
+    delete map[grId];          // 移到最後 = 視為最新
+    map[grId] = dataUrl;
+    let keys = Object.keys(map);
+    while (JSON.stringify(map).length > GRPhoto.BUDGET && keys.length > 1) delete map[keys.shift()];
+    try { localStorage.setItem(GRPhoto.KEY, JSON.stringify(map)); }
+    catch (err) {
+      while (keys.length > 0) {
+        delete map[keys.shift()];
+        try { localStorage.setItem(GRPhoto.KEY, JSON.stringify(map)); return; } catch (e2) { /* 繼續丟最舊的 */ }
+      }
+    }
+  },
+  remove(grId) {
+    const map = GRPhoto._load();
+    if (map[grId]) { delete map[grId]; try { localStorage.setItem(GRPhoto.KEY, JSON.stringify(map)); } catch (e) {} }
+  }
+};
+
+/* 一列的金額。廠商貨款單的算法是「每一列各自四捨五入到整數元」,再把各列相加。
+   系統跟著同一規則,合計才會跟單子完全一致
+   (例:26.15×250=6537.5 → 6538;若不進位、直接累加小數,七列下來就會差個幾元對不起來)。 */
+function grLineAmt(qty, unitPriceCents) {
+  return Math.round((qty || 0) * (unitPriceCents || 0) / 100) * 100;
+}
+
 const PagePurchase = {
   poLines: [],
   trendIng: "i_cabbage",
@@ -15,8 +51,8 @@ const PagePurchase = {
     <div class="card"><h3>進貨記錄</h3>
     ${UI.table(["進貨日", "供應商", "#品項數", "#金額", "備註", "操作"],
       grs.slice(0, 60).map(g => {
-        const amt = U.sum(g.lines, l => Math.round(l.qtyReceived * l.unitPrice));
-        return `<tr><td>${g.date}</td>
+        const amt = U.sum(g.lines, l => grLineAmt(l.qtyReceived, l.unitPrice));
+        return `<tr><td>${g.date}${(g.hasPhoto || GRPhoto.get(g.id)) ? ' <span title="有送貨單照片">📷</span>' : ""}</td>
         <td>${U.esc(UI.supName(g.supplierId))}</td>
         <td class="num">${g.lines.length}</td>
         <td class="num"><b>${U.fmt$(amt)}</b></td>
@@ -234,6 +270,7 @@ const PageQuote = {
 const PagePhotoGR = {
   rows: [],
   editId: null,   // 修改中的進貨單 id
+  photo: null,    // 本次進貨附的送貨單照片(dataURL,存本機)
 
   // open() 新增 / open(grId) 修改 / open(null,{supplierId,rows}) 帶入預填
   open(grId, preset) {
@@ -244,12 +281,13 @@ const PagePhotoGR = {
     PagePhotoGR.rows = gr
       ? gr.lines.map(l => ({ ingredientId: l.ingredientId, qty: l.qtyReceived, unitPrice: l.unitPrice, expiry: l.expiry || "" }))
       : (preset && preset.rows ? JSON.parse(JSON.stringify(preset.rows)) : []);
+    PagePhotoGR.photo = grId ? GRPhoto.get(grId) : null;
     UI.modal(grId ? "修改進貨單" : "進貨登記", `
       <div class="form-grid">
         <div><label class="fl">供應商 *(選了只列該廠商品項)</label><select id="pg_sup" style="width:100%" onchange="PagePhotoGR.renderRows()">${UI.supOptions(supId)}</select></div>
         <div><label class="fl">進貨日期</label><input id="pg_date" type="date" value="${date}" style="width:100%"></div>
         <div class="full">
-          <label class="fl">送貨單照片(選填,只顯示在旁邊對照,不上傳、不收費)</label>
+          <label class="fl">送貨單照片(選填,存本機、事後可在「明細」核對有無打錯;不上傳雲端、不佔試算表)</label>
           <input type="file" accept="image/*" capture="environment" onchange="PagePhotoGR.readImage(this)">
         </div>
       </div>
@@ -266,12 +304,33 @@ const PagePhotoGR = {
       });
     if (!PagePhotoGR.rows.length) PagePhotoGR.addRow();
     else PagePhotoGR.renderRows();
+    PagePhotoGR.showPreview();
+  },
+
+  showPreview() {
+    const pv = document.getElementById("pg_preview");
+    if (!pv) return;
+    pv.innerHTML = PagePhotoGR.photo
+      ? `<img src="${PagePhotoGR.photo}" style="max-width:100%;max-height:340px;border:1px solid var(--line);border-radius:8px">
+         <div><button class="btn small ghost-red" style="margin-top:6px" onclick="PagePhotoGR.photo=null;PagePhotoGR.showPreview()">移除照片</button></div>`
+      : "";
   },
 
   view(grId) {
     const g = DB.byId("goodsReceipts", grId);
     if (!g) return;
-    const amt = U.sum(g.lines, l => Math.round(l.qtyReceived * l.unitPrice));
+    const amt = U.sum(g.lines, l => grLineAmt(l.qtyReceived, l.unitPrice));
+    const localPhoto = GRPhoto.get(grId);
+    const cloudOn = typeof Sync !== "undefined" && Sync.configured();
+    const photoBox = localPhoto
+      ? `<div class="mini-title" style="margin-top:14px">📷 送貨單照片(核對用)</div>
+         <img src="${localPhoto}" style="max-width:100%;border:1px solid var(--line);border-radius:8px">`
+      : (g.hasPhoto && cloudOn
+        ? `<div class="mini-title" style="margin-top:14px">📷 送貨單照片(核對用)</div>
+           <div id="gr_photo_load"><p class="hint">☁️ 從雲端硬碟載入照片中…</p></div>`
+        : (g.hasPhoto
+          ? `<p class="hint" style="margin-top:12px">(這張有照片,但目前沒設定雲端硬碟,無法在這台裝置載入。請到設定頁填雲端資料庫。)</p>`
+          : ""));
     UI.modal("進貨明細 — " + g.date + "(" + UI.supName(g.supplierId) + ")",
       UI.table(["品項", "#數量", "#單價", "#小計", "效期"],
         g.lines.map(l => {
@@ -279,16 +338,34 @@ const PagePhotoGR = {
           return `<tr><td>${U.esc(UI.ingName(l.ingredientId))}</td>
           <td class="num">${U.fmtNum(l.qtyReceived)} ${ing ? U.esc(ing.stockUnit) : ""}</td>
           <td class="num">${U.fmt$(l.unitPrice)}</td>
-          <td class="num">${U.fmt$(Math.round(l.qtyReceived * l.unitPrice))}</td>
+          <td class="num">${U.fmt$(grLineAmt(l.qtyReceived, l.unitPrice))}</td>
           <td>${l.expiry || "—"}</td></tr>`;
-        })) + `<p style="text-align:right;margin-top:8px;font-weight:700">合計 ${U.fmt$(amt)}</p>`,
+        })) + `<p style="text-align:right;margin-top:8px;font-weight:700">合計 ${U.fmt$(amt)}</p>` + photoBox,
       { hideOk: true, width: 640 });
+    // 本機沒有但雲端有 → 非同步抓下來,同時存本機快取
+    if (!localPhoto && g.hasPhoto && cloudOn) {
+      Sync.getPhoto(grId).then(url => {
+        const box = document.getElementById("gr_photo_load");
+        if (!box) return; // 使用者已關閉視窗
+        if (url) {
+          GRPhoto.set(grId, url);
+          box.innerHTML = `<img src="${url}" style="max-width:100%;border:1px solid var(--line);border-radius:8px">`;
+        } else {
+          box.innerHTML = `<p class="hint">雲端找不到這張照片(可能未上傳成功)。</p>`;
+        }
+      }).catch(e => {
+        const box = document.getElementById("gr_photo_load");
+        if (box) box.innerHTML = `<p class="hint">照片載入失敗:${U.esc(e.message)}</p>`;
+      });
+    }
   },
 
   del(grId) {
     UI.confirm("確定刪除此進貨單?會一併回沖它建立的庫存與價格記錄(尚未消耗的批號)。", () => {
       Domain.reverseGoodsReceipt(grId);
       DB.remove("goodsReceipts", grId);
+      GRPhoto.remove(grId);
+      if (typeof Sync !== "undefined" && Sync.configured()) Sync.deletePhoto(grId).catch(() => {});
       UI.toast("已刪除進貨單並回沖庫存");
       App.refresh();
     });
@@ -300,13 +377,13 @@ const PagePhotoGR = {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      const scale = Math.min(1, 1400 / Math.max(img.width, img.height));
+      const scale = Math.min(1, 1200 / Math.max(img.width, img.height));
       const cv = document.createElement("canvas");
       cv.width = Math.round(img.width * scale);
       cv.height = Math.round(img.height * scale);
       cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-      const pv = document.getElementById("pg_preview");
-      if (pv) pv.innerHTML = `<img src="${cv.toDataURL("image/jpeg", 0.85)}" style="max-width:100%;max-height:340px;border:1px solid var(--line);border-radius:8px">`;
+      PagePhotoGR.photo = cv.toDataURL("image/jpeg", 0.7);
+      PagePhotoGR.showPreview();
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -326,18 +403,33 @@ const PagePhotoGR = {
     }
     const supId = UI.val("pg_sup");
     box.innerHTML = `<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>品項 *</th><th class="num">數量</th><th class="num">單價(元/計價單位)</th><th>效期</th><th></th></tr></thead>
+      <thead><tr><th>品項 *</th><th class="num">數量</th><th class="num">單價(元/計價單位)</th><th class="num">小計</th><th>效期(選填)</th><th></th></tr></thead>
       <tbody>` + PagePhotoGR.rows.map((r, idx) => {
         const ing = DB.byId("ingredients", r.ingredientId);
         return `<tr style="${r.ingredientId ? "" : "background:#fdf3e3"}">
           <td><select style="min-width:200px" onchange="PagePhotoGR.setRow(${idx},'ingredientId',this.value)">${UI.ingOptionsBySupplier(supId, r.ingredientId)}</select></td>
-          <td class="num"><input type="number" step="any" value="${r.qty}" style="width:80px" oninput="PagePhotoGR.rows[${idx}].qty=parseFloat(this.value)||0">${ing ? " " + U.esc(ing.stockUnit) : ""}</td>
-          <td class="num"><input type="number" step="any" value="${r.unitPrice ? r.unitPrice / 100 : ""}" style="width:90px" oninput="PagePhotoGR.rows[${idx}].unitPrice=Math.round((parseFloat(this.value)||0)*100)"></td>
+          <td class="num"><input type="number" step="any" value="${r.qty}" style="width:80px" oninput="PagePhotoGR.updateAmt(${idx},'qty',this.value)">${ing ? " " + U.esc(ing.stockUnit) : ""}</td>
+          <td class="num"><input type="number" step="any" value="${r.unitPrice ? r.unitPrice / 100 : ""}" style="width:90px" oninput="PagePhotoGR.updateAmt(${idx},'unitPrice',this.value)"></td>
+          <td class="num"><b id="pg_sub_${idx}">${U.fmt$(grLineAmt(r.qty, r.unitPrice))}</b></td>
           <td><input type="date" value="${r.expiry || ""}" style="width:135px" onchange="PagePhotoGR.rows[${idx}].expiry=this.value"></td>
           <td><button class="btn small ghost-red" onclick="PagePhotoGR.rows.splice(${idx},1);PagePhotoGR.renderRows()">✕</button></td>
         </tr>`;
       }).join("") + `</tbody></table></div>
-      <p class="hint" style="margin-top:6px">合計:${U.fmt$(U.sum(PagePhotoGR.rows, r => Math.round(r.qty * r.unitPrice)))}(橘底列=尚未對應品項,不會入庫)</p>`;
+      <p class="hint" style="margin-top:6px">合計:<b id="pg_total" style="font-size:14px">${U.fmt$(PagePhotoGR.total())}</b>(橘底列=尚未對應品項,不會入庫)</p>`;
+  },
+
+  total() { return U.sum(PagePhotoGR.rows, r => grLineAmt(r.qty, r.unitPrice)); },
+
+  // 數量/單價改動時即時更新該列小計與合計。
+  // 只改文字、不重繪整個表格 — 重繪會把輸入框換掉導致游標跳走(打「200」變成要點三次)。
+  updateAmt(idx, key, val) {
+    const num = parseFloat(val) || 0;
+    PagePhotoGR.rows[idx][key] = (key === "unitPrice") ? Math.round(num * 100) : num;
+    const r = PagePhotoGR.rows[idx];
+    const sub = document.getElementById("pg_sub_" + idx);
+    if (sub) sub.textContent = U.fmt$(grLineAmt(r.qty, r.unitPrice));
+    const tot = document.getElementById("pg_total");
+    if (tot) tot.textContent = U.fmt$(PagePhotoGR.total());
   },
 
   setRow(idx, key, val) {
@@ -345,8 +437,7 @@ const PagePhotoGR = {
     if (key === "ingredientId") {
       const ing = DB.byId("ingredients", val);
       if (ing) {
-        if (!PagePhotoGR.rows[idx].expiry && ing.shelfLifeDays < 999)
-          PagePhotoGR.rows[idx].expiry = U.addDays(UI.val("pg_date") || U.today(), ing.shelfLifeDays);
+        // 效期不自動帶入(使用者要求),需要時自己填
         // 自動帶入該供應商的建檔價(每計價單位),可再手動修改
         if (!PagePhotoGR.rows[idx].unitPrice) {
           const supId = UI.val("pg_sup");
@@ -382,11 +473,24 @@ const PagePhotoGR = {
       }
       grLines.push({ ingredientId: ing.id, qtyReceived: r.qty, unitPrice: r.unitPrice, batchNo, expiry: r.expiry || null });
     }
-    const rec = { id: grId, date, lines: grLines, source: "manual", supplierId };
+    const rec = { id: grId, date, lines: grLines, source: "manual", supplierId, hasPhoto: !!PagePhotoGR.photo };
     if (PagePhotoGR.editId) DB.update("goodsReceipts", grId, rec);
     else DB.insert("goodsReceipts", rec);
+    GRPhoto.set(grId, PagePhotoGR.photo);   // 本機快取(即時看)
+    // 照片同步到雲端硬碟(跨裝置可看);沒設定雲端就只留本機
+    const photoForCloud = PagePhotoGR.photo;
+    if (typeof Sync !== "undefined" && Sync.configured()) {
+      if (photoForCloud) {
+        Sync.savePhoto(grId, photoForCloud)
+          .then(() => { GRPhoto.cloudIds && GRPhoto.cloudIds.add(grId); })
+          .catch(e => UI.toast("照片上傳雲端失敗(本機仍留存):" + e.message, true));
+      } else if (PagePhotoGR.editId) {
+        Sync.deletePhoto(grId).catch(() => {});
+      }
+    }
     UI.toast(PagePhotoGR.editId ? "進貨單已修改" : `進貨完成:${grLines.length} 品項已入庫`);
     PagePhotoGR.editId = null;
+    PagePhotoGR.photo = null;
     App.refresh();
   }
 };
