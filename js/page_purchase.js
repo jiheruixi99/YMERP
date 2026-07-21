@@ -266,15 +266,16 @@ const PagePhotoGR = {
   photo: null,    // 本次進貨附的送貨單照片(dataURL,存本機)
 
   // open() 新增 / open(grId) 修改 / open(null,{supplierId,rows}) 帶入預填
+  // preset 優先於資料庫內容 — 中途去建新品項再回來時,才不會把打到一半的明細洗掉
   open(grId, preset) {
     PagePhotoGR.editId = grId || null;
     const gr = grId ? DB.byId("goodsReceipts", grId) : null;
-    const supId = gr ? gr.supplierId : (preset ? preset.supplierId : "");
-    const date = gr ? gr.date : U.today();
-    PagePhotoGR.rows = gr
-      ? gr.lines.map(l => ({ ingredientId: l.ingredientId, qty: l.qtyReceived, unitPrice: l.unitPrice, expiry: l.expiry || "" }))
-      : (preset && preset.rows ? JSON.parse(JSON.stringify(preset.rows)) : []);
-    PagePhotoGR.photo = grId ? GRPhoto.get(grId) : null;
+    const supId = (preset && preset.supplierId) || (gr ? gr.supplierId : "");
+    const date = (preset && preset.date) || (gr ? gr.date : U.today());
+    PagePhotoGR.rows = (preset && preset.rows)
+      ? JSON.parse(JSON.stringify(preset.rows))
+      : (gr ? gr.lines.map(l => ({ ingredientId: l.ingredientId, qty: l.qtyReceived, unitPrice: l.unitPrice, expiry: l.expiry || "" })) : []);
+    PagePhotoGR.photo = (preset && preset.photo !== undefined) ? preset.photo : (grId ? GRPhoto.get(grId) : null);
     UI.modal(grId ? "修改進貨單" : "進貨登記", `
       <div class="form-grid">
         <div><label class="fl">供應商 *(選了只列該廠商品項)</label><select id="pg_sup" style="width:100%" onchange="PagePhotoGR.renderRows()">${UI.supOptions(supId)}</select></div>
@@ -400,7 +401,7 @@ const PagePhotoGR = {
       <tbody>` + PagePhotoGR.rows.map((r, idx) => {
         const ing = DB.byId("ingredients", r.ingredientId);
         return `<tr style="${r.ingredientId ? "" : "background:#fdf3e3"}">
-          <td><select style="min-width:200px" onchange="PagePhotoGR.setRow(${idx},'ingredientId',this.value)">${UI.ingOptionsBySupplier(supId, r.ingredientId)}</select></td>
+          <td><select style="min-width:200px" onchange="PagePhotoGR.setRow(${idx},'ingredientId',this.value)">${UI.ingOptionsBySupplier(supId, r.ingredientId)}<option value="__new__">➕ 叫了新品 — 新增品項…</option></select></td>
           <td class="num"><input type="number" step="any" value="${r.qty}" style="width:80px" oninput="PagePhotoGR.updateAmt(${idx},'qty',this.value)">${ing ? " " + U.esc(ing.stockUnit) : ""}</td>
           <td class="num"><input type="number" step="any" value="${r.unitPrice ? r.unitPrice / 100 : ""}" style="width:90px" oninput="PagePhotoGR.updateAmt(${idx},'unitPrice',this.value)"></td>
           <td class="num"><b id="pg_sub_${idx}">${U.fmt$(U.lineAmt(r.qty, r.unitPrice))}</b></td>
@@ -426,6 +427,8 @@ const PagePhotoGR = {
   },
 
   setRow(idx, key, val) {
+    // 選到「➕ 叫了新品」→ 先去建食材主檔,建完自動填回這一列
+    if (key === "ingredientId" && val === "__new__") { PagePhotoGR.newIngForRow(idx); return; }
     PagePhotoGR.rows[idx][key] = val;
     if (key === "ingredientId") {
       const ing = DB.byId("ingredients", val);
@@ -435,11 +438,34 @@ const PagePhotoGR = {
         if (!PagePhotoGR.rows[idx].unitPrice) {
           const supId = UI.val("pg_sup");
           const quote = supId ? U.sortBy(DB.get("supplierPrices").filter(q => q.supplierId === supId && q.ingredientId === val), q => q.effectiveDate, true)[0] : null;
-          PagePhotoGR.rows[idx].unitPrice = quote ? quote.unitPrice : Domain.currentPrice(val);
+          // 報價 → 最近進價 → 建檔時填的參考單價(新品項還沒有前兩者)
+          PagePhotoGR.rows[idx].unitPrice = quote ? quote.unitPrice : (Domain.currentPrice(val) || ing.basePrice || 0);
         }
       }
     }
     PagePhotoGR.renderRows();
+  },
+
+  // 叫到主檔還沒有的新品 → 就地建檔。
+  // 先把打到一半的整張單存起來,建完品項再原封不動開回來,只把新品項填進觸發的那一列。
+  newIngForRow(idx) {
+    const keep = {
+      editId: PagePhotoGR.editId,
+      supplierId: UI.val("pg_sup"),
+      date: UI.val("pg_date"),
+      rows: JSON.parse(JSON.stringify(PagePhotoGR.rows)),
+      photo: PagePhotoGR.photo
+    };
+    UI.closeModal();
+    PageIng.edit(null, {
+      supplierId: keep.supplierId,
+      onDone(ing) {
+        PagePhotoGR.open(keep.editId, keep);
+        PagePhotoGR.setRow(idx, "ingredientId", ing.id);  // 自動帶價並重繪
+        UI.toast(`已建檔「${ing.name}」並填入第 ${idx + 1} 列`);
+      },
+      onCancel() { PagePhotoGR.open(keep.editId, keep); }   // 放棄建檔也要把單子還回來
+    });
   },
 
   post() {

@@ -93,9 +93,23 @@ const PageIng = {
       </div>`,
       {
         width: 720,
+        onCancel: opts.onCancel,   // 讓呼叫端(如進貨登記)在使用者放棄建檔時能回到原視窗
         onOk() {
-          const name = UI.val("f_name");
+          const name = (UI.val("f_name") || "").trim();
           if (!name) { UI.toast("請輸入品名", true); return false; }
+          // 防止重複建檔:同名的已經存在時,直接沿用既有品項
+          if (!id) {
+            const dup = DB.get("ingredients").find(x => x.active !== false && (x.name || "").trim() === name);
+            if (dup) {
+              if (opts.onDone) {
+                UI.toast(`主檔已有「${name}」,直接沿用既有品項,不重複建檔`);
+                setTimeout(() => opts.onDone(dup), 0);
+                return;   // 關閉視窗,不新增
+              }
+              UI.toast(`「${name}」已存在於食材主檔,請直接編輯既有品項`, true);
+              return false;
+            }
+          }
           const su = UI.val("f_su") || "計價單位";
           const patch = {
             name, category: UI.val("f_cat"), storage: UI.val("f_sto"),

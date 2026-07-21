@@ -15,6 +15,7 @@ const UI = {
   modal(title, bodyHTML, opts) {
     opts = opts || {};
     UI._onOk = opts.onOk || null;
+    UI._onCancel = opts.onCancel || null;   // 按取消/✕/Esc 時呼叫(用於「中途去建檔,取消要回到原視窗」)
     const mask = document.getElementById("modalMask");
     const box = document.getElementById("modalBox");
     box.style.maxWidth = (opts.width || 760) + "px";
@@ -29,11 +30,15 @@ const UI = {
   },
   okModal() {
     if (UI._onOk) { if (UI._onOk() === false) return; }
+    UI._onCancel = null;   // 有按確定就不算取消
     UI.closeModal();
   },
   closeModal() {
     document.getElementById("modalMask").classList.remove("show");
+    const cancel = UI._onCancel;
     UI._onOk = null;
+    UI._onCancel = null;
+    if (cancel) setTimeout(cancel, 0);   // 延後,避免跟正在關閉的視窗打架
   },
 
   confirm(msg, onYes) {
