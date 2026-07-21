@@ -467,6 +467,10 @@ const Domain = {
       if (ing && ing.category === "包材耗材") purchasesMisc += m.costCents;
       else purchasesFood += m.costCents;
     }
+    // 雜項用品(清潔用品/耗材,獨立於食材主檔)也算進雜項進貨
+    for (const p of DB.get("supplyPurchases")) {
+      if (p.date >= from && p.date <= to) purchasesMisc += U.lineAmt(p.qty, p.unitPrice);
+    }
     // 人力成本(PT 登記;無登記則用設定的備援估計)
     const laborLogs = DB.get("laborLogs").filter(l => l.date >= from && l.date <= to);
     let labor = U.sum(laborLogs, Domain.laborCost);

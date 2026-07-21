@@ -31,6 +31,12 @@ const U = {
 
   /* ---- 金額:一律以「分」整數儲存 ---- */
   toCents(v) { const n = parseFloat(v); return isNaN(n) ? 0 : Math.round(n * 100); },
+  /* 進貨單一列的金額。廠商貨款單是「每列各自四捨五入到整數元」再加總,
+     系統跟著同一規則,合計才會跟單子一致
+     (例:26.15×250=6537.5 → 6538;直接累加小數的話七列下來會差個幾元)。 */
+  lineAmt(qty, unitPriceCents) {
+    return Math.round((qty || 0) * (unitPriceCents || 0) / 100) * 100;
+  },
   fmt$(cents, showDec) {
     if (cents == null || isNaN(cents)) return "—";
     const v = cents / 100;

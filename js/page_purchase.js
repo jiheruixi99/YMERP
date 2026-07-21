@@ -30,13 +30,6 @@ const GRPhoto = {
   }
 };
 
-/* 一列的金額。廠商貨款單的算法是「每一列各自四捨五入到整數元」,再把各列相加。
-   系統跟著同一規則,合計才會跟單子完全一致
-   (例:26.15×250=6537.5 → 6538;若不進位、直接累加小數,七列下來就會差個幾元對不起來)。 */
-function grLineAmt(qty, unitPriceCents) {
-  return Math.round((qty || 0) * (unitPriceCents || 0) / 100) * 100;
-}
-
 const PagePurchase = {
   poLines: [],
   trendIng: "i_cabbage",
@@ -51,7 +44,7 @@ const PagePurchase = {
     <div class="card"><h3>進貨記錄</h3>
     ${UI.table(["進貨日", "供應商", "#品項數", "#金額", "備註", "操作"],
       grs.slice(0, 60).map(g => {
-        const amt = U.sum(g.lines, l => grLineAmt(l.qtyReceived, l.unitPrice));
+        const amt = U.sum(g.lines, l => U.lineAmt(l.qtyReceived, l.unitPrice));
         return `<tr><td>${g.date}${(g.hasPhoto || GRPhoto.get(g.id)) ? ' <span title="有送貨單照片">📷</span>' : ""}</td>
         <td>${U.esc(UI.supName(g.supplierId))}</td>
         <td class="num">${g.lines.length}</td>
@@ -319,7 +312,7 @@ const PagePhotoGR = {
   view(grId) {
     const g = DB.byId("goodsReceipts", grId);
     if (!g) return;
-    const amt = U.sum(g.lines, l => grLineAmt(l.qtyReceived, l.unitPrice));
+    const amt = U.sum(g.lines, l => U.lineAmt(l.qtyReceived, l.unitPrice));
     const localPhoto = GRPhoto.get(grId);
     const cloudOn = typeof Sync !== "undefined" && Sync.configured();
     const photoBox = localPhoto
@@ -338,7 +331,7 @@ const PagePhotoGR = {
           return `<tr><td>${U.esc(UI.ingName(l.ingredientId))}</td>
           <td class="num">${U.fmtNum(l.qtyReceived)} ${ing ? U.esc(ing.stockUnit) : ""}</td>
           <td class="num">${U.fmt$(l.unitPrice)}</td>
-          <td class="num">${U.fmt$(grLineAmt(l.qtyReceived, l.unitPrice))}</td>
+          <td class="num">${U.fmt$(U.lineAmt(l.qtyReceived, l.unitPrice))}</td>
           <td>${l.expiry || "—"}</td></tr>`;
         })) + `<p style="text-align:right;margin-top:8px;font-weight:700">合計 ${U.fmt$(amt)}</p>` + photoBox,
       { hideOk: true, width: 640 });
@@ -410,7 +403,7 @@ const PagePhotoGR = {
           <td><select style="min-width:200px" onchange="PagePhotoGR.setRow(${idx},'ingredientId',this.value)">${UI.ingOptionsBySupplier(supId, r.ingredientId)}</select></td>
           <td class="num"><input type="number" step="any" value="${r.qty}" style="width:80px" oninput="PagePhotoGR.updateAmt(${idx},'qty',this.value)">${ing ? " " + U.esc(ing.stockUnit) : ""}</td>
           <td class="num"><input type="number" step="any" value="${r.unitPrice ? r.unitPrice / 100 : ""}" style="width:90px" oninput="PagePhotoGR.updateAmt(${idx},'unitPrice',this.value)"></td>
-          <td class="num"><b id="pg_sub_${idx}">${U.fmt$(grLineAmt(r.qty, r.unitPrice))}</b></td>
+          <td class="num"><b id="pg_sub_${idx}">${U.fmt$(U.lineAmt(r.qty, r.unitPrice))}</b></td>
           <td><input type="date" value="${r.expiry || ""}" style="width:135px" onchange="PagePhotoGR.rows[${idx}].expiry=this.value"></td>
           <td><button class="btn small ghost-red" onclick="PagePhotoGR.rows.splice(${idx},1);PagePhotoGR.renderRows()">✕</button></td>
         </tr>`;
@@ -418,7 +411,7 @@ const PagePhotoGR = {
       <p class="hint" style="margin-top:6px">合計:<b id="pg_total" style="font-size:14px">${U.fmt$(PagePhotoGR.total())}</b>(橘底列=尚未對應品項,不會入庫)</p>`;
   },
 
-  total() { return U.sum(PagePhotoGR.rows, r => grLineAmt(r.qty, r.unitPrice)); },
+  total() { return U.sum(PagePhotoGR.rows, r => U.lineAmt(r.qty, r.unitPrice)); },
 
   // 數量/單價改動時即時更新該列小計與合計。
   // 只改文字、不重繪整個表格 — 重繪會把輸入框換掉導致游標跳走(打「200」變成要點三次)。
@@ -427,7 +420,7 @@ const PagePhotoGR = {
     PagePhotoGR.rows[idx][key] = (key === "unitPrice") ? Math.round(num * 100) : num;
     const r = PagePhotoGR.rows[idx];
     const sub = document.getElementById("pg_sub_" + idx);
-    if (sub) sub.textContent = U.fmt$(grLineAmt(r.qty, r.unitPrice));
+    if (sub) sub.textContent = U.fmt$(U.lineAmt(r.qty, r.unitPrice));
     const tot = document.getElementById("pg_total");
     if (tot) tot.textContent = U.fmt$(PagePhotoGR.total());
   },

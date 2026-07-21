@@ -282,6 +282,75 @@ const PageExpense = {
   }
 };
 
+/* ---------------- 廠商進貨分析(叫了多少錢 / 占比) ---------------- */
+const PageSupplierSpend = {
+  month: null,   // "全部" = 不限期間
+
+  // 依進貨單彙總各廠商:金額(與貨款單同一套四捨五入)、單數、品項次數
+  summary(ym) {
+    const grs = DB.get("goodsReceipts").filter(g => ym === "全部" || (g.date || "").slice(0, 7) === ym);
+    const map = {};
+    for (const g of grs) {
+      const key = g.supplierId || "(未指定廠商)";
+      if (!map[key]) map[key] = { supplierId: g.supplierId, amount: 0, orders: 0, lines: 0, lastDate: "" };
+      const row = map[key];
+      row.amount += U.sum(g.lines, l => U.lineAmt(l.qtyReceived, l.unitPrice));
+      row.orders += 1;
+      row.lines += g.lines.length;
+      if (g.date > row.lastDate) row.lastDate = g.date;
+    }
+    const list = U.sortBy(Object.values(map), r => -r.amount);
+    const total = U.sum(list, r => r.amount);
+    list.forEach(r => r.share = total ? r.amount / total : 0);
+    return { list, total, orderCount: grs.length };
+  },
+
+  render(c) {
+    const ym = PageSupplierSpend.month || U.thisMonth();
+    PageSupplierSpend.month = ym;
+    const { list, total, orderCount } = PageSupplierSpend.summary(ym);
+    const top = list[0];
+
+    // 各廠商在不同月份的金額,用來看「這家是不是變貴/叫更多」
+    const bar = pct => `<div style="background:#e7ebf0;border-radius:4px;height:8px;overflow:hidden">
+      <div style="width:${(pct * 100).toFixed(1)}%;height:100%;background:var(--accent)"></div></div>`;
+
+    c.innerHTML = `
+    <div class="alert info">💡 統計各廠商的進貨金額與占比,金額與貨款單同一套算法(每列四捨五入到整數元)。用途:看錢主要花在哪幾家、談判時心裡有底、發現某家占比突然變高。</div>
+    <div class="toolbar">
+      <label class="fl" style="margin:0">期間:</label>
+      <select onchange="PageSupplierSpend.month=this.value;App.refresh()" style="min-width:150px">
+        <option ${ym === "全部" ? "selected" : ""}>全部</option>
+        ${monthOptions(ym)}
+      </select>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><div class="k-label">進貨總額</div><div class="k-value">${U.fmt$(total)}</div>
+        <div class="k-note">${orderCount} 張進貨單 · ${list.length} 家廠商</div></div>
+      <div class="kpi"><div class="k-label">最大廠商</div><div class="k-value" style="font-size:19px">${top ? U.esc(UI.supName(top.supplierId)) : "—"}</div>
+        <div class="k-note">${top ? U.fmt$(top.amount) + "(" + U.pct(top.share) + ")" : "尚無資料"}</div></div>
+      <div class="kpi ${top && top.share > 0.5 ? "warn" : ""}"><div class="k-label">集中度(前 3 家)</div>
+        <div class="k-value">${list.length ? U.pct(U.sum(list.slice(0, 3), r => r.share)) : "—"}</div>
+        <div class="k-note">${top && top.share > 0.5 ? "單一廠商過半,議價空間有限" : "分散度尚可"}</div></div>
+    </div>
+    <div class="card">
+      <h3>🏢 各廠商進貨金額 <span class="sub">${ym === "全部" ? "全部期間" : ym}</span></h3>
+      ${UI.table(["廠商", "#進貨單數", "#品項次數", "#金額", "#占比", "占比圖", "最後進貨日"],
+        list.map(r => `<tr>
+          <td><b>${U.esc(UI.supName(r.supplierId))}</b></td>
+          <td class="num">${r.orders}</td>
+          <td class="num">${r.lines}</td>
+          <td class="num"><b>${U.fmt$(r.amount)}</b></td>
+          <td class="num">${U.pct(r.share)}</td>
+          <td style="min-width:130px">${bar(r.share)}</td>
+          <td class="t-muted">${r.lastDate || "—"}</td></tr>`),
+        "此期間尚無進貨記錄")}
+      ${list.length ? `<p style="text-align:right;margin-top:10px;font-weight:700">合計 ${U.fmt$(total)}</p>` : ""}
+    </div>`;
+  }
+};
+
 App.register("fi_profit", "財報 — 月損益 / 總獲利 ★", PageProfit.render);
 App.register("fi_labor", "財報 — PT 人力成本", PageLabor.render);
 App.register("fi_expense", "財報 — 支出登記(水電/稅金…)", PageExpense.render);
+App.register("fi_supplier", "財報 — 廠商進貨分析(金額 / 占比)", PageSupplierSpend.render);

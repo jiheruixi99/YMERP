@@ -10,7 +10,8 @@ const DB = {
     "suppliers", "ingredients", "supplierPrices", "purchaseOrders", "goodsReceipts",
     "priceHistory", "stockBatches", "stockMovements", "stockCounts", "wasteLogs",
     "recipes", "productionOrders", "salesDaily", "reservations", "forecasts", "pricePlans",
-    "laborLogs", "expenses", "menuMap", "posOrderItems"
+    "laborLogs", "expenses", "menuMap", "posOrderItems",
+    "supplies", "supplyPurchases", "supplyCounts"
   ],
 
   DEFAULT_SETTINGS: {

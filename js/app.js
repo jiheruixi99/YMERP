@@ -7,7 +7,7 @@ const App = {
 
   ROLES: {
     "老闆": null, // null = 全部
-    "店長": ["dash", "m_sup", "m_ing", "m_rcp", "m_plan", "p_po", "p_quote", "p_trend", "p_sugg", "s_stock", "s_count", "s_waste", "pr_mo", "pr_var", "pr_orders", "sd_sales", "sd_fc", "sd_resv", "fi_labor", "fi_expense", "rp_cost", "rp_waste", "rp_struct"],
+    "店長": ["dash", "m_sup", "m_ing", "m_supply", "m_rcp", "m_plan", "p_po", "p_quote", "p_trend", "p_sugg", "s_stock", "s_count", "s_waste", "pr_mo", "pr_var", "pr_orders", "sd_sales", "sd_fc", "sd_resv", "fi_labor", "fi_expense", "fi_supplier", "rp_cost", "rp_waste", "rp_struct"],
     "廚房/後場": ["dash", "m_rcp", "pr_mo", "pr_var", "s_stock", "s_count", "s_waste"],
     "外場/櫃檯": ["dash", "sd_resv", "sd_sales", "sd_fc"]
   },
@@ -16,7 +16,7 @@ const App = {
     { group: "總覽", items: [["dash", "📊", "儀表板"]] },
     {
       group: "主檔", items: [
-        ["m_ing", "🥬", "食材品項"], ["m_sup", "🚚", "供應商"],
+        ["m_ing", "🥬", "食材品項"], ["m_supply", "🧴", "雜項用品"], ["m_sup", "🚚", "供應商"],
         ["m_rcp", "📖", "配方(BOM)"], ["m_plan", "🎫", "菜單價格"]]
     },
     {
@@ -38,6 +38,7 @@ const App = {
     {
       group: "財報 FI", items: [
         ["fi_profit", "💹", "月財報(獲利)"], ["fi_labor", "🧑‍🍳", "人力成本"], ["fi_expense", "🧾", "支出登記"],
+        ["fi_supplier", "🏢", "廠商進貨分析"],
         ["rp_cost", "🎯", "食材成本率"], ["rp_waste", "📉", "損耗報表"], ["rp_struct", "🏛️", "成本結構"]]
     },
     { group: "系統", items: [["sys_set", "⚙️", "設定/備份"]] }
