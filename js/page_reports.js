@@ -2,16 +2,15 @@
 "use strict";
 
 const PageReports = {
-  month: null,
+  from: null, to: null,
   wFrom: null, wTo: null,
 
   /* ---------------- 食材成本率(北極星) ---------------- */
   renderCost(c) {
-    const ym = PageReports.month || U.thisMonth();
-    PageReports.month = ym;
-    const days = U.monthDays(ym).filter(d => d <= U.today());
+    const from = PageReports.from || (PageReports.from = U.monthStart());
+    const to = PageReports.to || (PageReports.to = U.today());
     const target = DB.setting("targetCostRate");
-    const series = days.length ? Domain.costRateSeries(days[0], days[days.length - 1]) : [];
+    const series = Domain.costRateSeries(from, to);
     const withRev = series.filter(d => d.revenue > 0);
 
     const totRev = U.sum(withRev, d => d.revenue);
@@ -19,23 +18,13 @@ const PageReports = {
     const totTheo = U.sum(withRev, d => d.theo);
     const mRate = totRev ? totCost / totRev : null;
 
-    // 月份選單(近 6 個月)
-    const months = [];
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(); d.setMonth(d.getMonth() - i);
-      months.push(U.fmtDate(d).slice(0, 7));
-    }
-
     c.innerHTML = `
-    <div class="toolbar">
-      <label class="fl" style="margin:0">月份:</label>
-      <select onchange="PageReports.month=this.value;App.refresh()">${months.map(m => `<option ${m === ym ? "selected" : ""}>${m}</option>`).join("")}</select>
-    </div>
+    ${dateRangeBar("PageReports", PageReports)}
     <div class="kpi-row">
       <div class="kpi ${mRate == null ? "" : mRate <= target ? "good" : mRate <= target + 0.05 ? "warn" : "bad"}">
-        <div class="k-label">${ym} 食材成本率 ★</div><div class="k-value">${mRate == null ? "—" : U.pct(mRate)}</div>
+        <div class="k-label">食材成本率 ★</div><div class="k-value">${mRate == null ? "—" : U.pct(mRate)}</div>
         <div class="k-note">目標 ≤ ${U.pct(target, 0)}</div></div>
-      <div class="kpi"><div class="k-label">月營收</div><div class="k-value">${U.fmt$(totRev)}</div></div>
+      <div class="kpi"><div class="k-label">區間營收</div><div class="k-value">${U.fmt$(totRev)}</div></div>
       <div class="kpi"><div class="k-label">食材成本(實際)</div><div class="k-value">${U.fmt$(totCost)}</div>
         <div class="k-note">理論 ${U.fmt$(totTheo)}</div></div>
       <div class="kpi ${totCost - totTheo > 0 ? "bad" : "good"}"><div class="k-label">理論 vs 實際差異</div>
@@ -45,7 +34,7 @@ const PageReports = {
         <div class="k-note">毛利率 ${totRev ? U.pct((totRev - totCost) / totRev) : "—"}</div></div>
     </div>
     <div class="card">
-      <h3>📉 每日食材成本率(${ym})</h3>
+      <h3>📉 每日食材成本率 <span class="sub">${from} ~ ${to}</span></h3>
       ${Chart.line({
         width: 900, height: 250,
         series: [
@@ -129,11 +118,11 @@ const PageReports = {
 
   /* ---------------- 成本結構(Prime Cost) ---------------- */
   renderStruct(c) {
-    const ym = PageReports.month || U.thisMonth();
-    const days = U.monthDays(ym).filter(d => d <= U.today());
-    const rev = days.length ? Domain.revenue(days[0], days[days.length - 1]) : { revenue: 0 };
-    const fc = days.length ? Domain.foodCost(days[0], days[days.length - 1]) : { actual: 0 };
-    const p = Domain.monthlyPnl(ym);
+    const from = PageReports.sFrom || (PageReports.sFrom = U.monthStart());
+    const to = PageReports.sTo || (PageReports.sTo = U.today());
+    const rev = Domain.revenue(from, to);
+    const fc = Domain.foodCost(from, to);
+    const p = Domain.pnl(from, to);
     const labor = p.labor;
     const rent = p.expByCat["租金"] || 0;
     const util = (p.expByCat["水電"] || 0) + (p.expByCat["瓦斯"] || 0);
@@ -148,9 +137,10 @@ const PageReports = {
     ];
 
     c.innerHTML = `
-    <div class="alert info">💡 人事來自「人力成本」登記、費用來自「支出登記」(無登記月份用設定頁估計值,標「估」)。食材用「消耗」計算(領用+損耗+盤差);要看現金基礎的完整損益 → 「月財報(獲利)」頁。Prime Cost = 食材 + 人事,餐飲業健康值一般 ≤ 60~65%。</div>
+    <div class="alert info">💡 人事來自「人力成本」登記、費用來自「支出登記」(無登記區間用設定頁估計值依天數換算,標「估」)。食材用「消耗」計算(領用+損耗+盤差);要看現金基礎的完整損益 → 「月財報(獲利)」頁。Prime Cost = 食材 + 人事,餐飲業健康值一般 ≤ 60~65%。</div>
+    ${dateRangeBar("PageReports", PageReports, "", "sFrom", "sTo")}
     <div class="kpi-row">
-      <div class="kpi"><div class="k-label">${ym} 營收</div><div class="k-value">${U.fmt$(rev.revenue)}</div></div>
+      <div class="kpi"><div class="k-label">區間營收</div><div class="k-value">${U.fmt$(rev.revenue)}</div></div>
       <div class="kpi ${rev.revenue && prime / rev.revenue <= 0.65 ? "good" : "bad"}"><div class="k-label">Prime Cost 占比 ★</div>
         <div class="k-value">${rev.revenue ? U.pct(prime / rev.revenue) : "—"}</div>
         <div class="k-note">食材+人事 ${U.fmt$(prime)}</div></div>

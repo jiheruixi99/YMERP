@@ -14,15 +14,30 @@ function monthOptions(sel) {
   return months.map(m => `<option ${m === sel ? "selected" : ""}>${m}</option>`).join("");
 }
 
+/* 共用的「從~到」日期區間工具列。
+   pageRef 是 page 物件在全域的名字(如 "PageProfit");fromKey/toKey 是欄位名(預設 from/to,
+   同一頁有兩組區間時可傳不同名,如 sFrom/sTo)。回傳工具列 HTML;extra 接在右邊。 */
+function dateRangeBar(pageRef, page, extra, fromKey, toKey) {
+  fromKey = fromKey || "from"; toKey = toKey || "to";
+  if (!page[fromKey]) page[fromKey] = U.monthStart();
+  if (!page[toKey]) page[toKey] = U.today();
+  return `<div class="toolbar">
+    <label class="fl" style="margin:0">期間:</label>
+    <input type="date" value="${page[fromKey]}" onchange="${pageRef}.${fromKey}=this.value;App.refresh()">
+    <span>~</span>
+    <input type="date" value="${page[toKey]}" onchange="${pageRef}.${toKey}=this.value;App.refresh()">
+    ${extra || ""}
+  </div>`;
+}
+function rangeLabel(page, fromKey, toKey) { return page[fromKey || "from"] + " ~ " + page[toKey || "to"]; }
+
 /* ---------------- 月財報(總獲利)★ ---------------- */
 const PageProfit = {
-  month: null,
+  from: null, to: null,
 
   render(c) {
-    const ym = PageProfit.month || U.thisMonth();
-    PageProfit.month = ym;
-    const p = Domain.monthlyPnl(ym);
-    const est = txt => `<span class="badge b-orange" title="該月尚無實際登記,使用設定頁的備援估計值">估</span> ${txt}`;
+    const p = Domain.pnl(PageProfit.from || (PageProfit.from = U.monthStart()), PageProfit.to || (PageProfit.to = U.today()));
+    const est = txt => `<span class="badge b-orange" title="此區間尚無實際登記,使用設定頁的備援估計值(依天數比例換算)">估</span> ${txt}`;
 
     // 近 6 個月獲利趨勢
     const trend = [];
@@ -42,13 +57,9 @@ const PageProfit = {
     };
 
     let html = `
-    <div class="toolbar">
-      <label class="fl" style="margin:0">月份:</label>
-      <select onchange="PageProfit.month=this.value;App.refresh()">${monthOptions(ym)}</select>
-      <span class="t-muted" style="font-size:12.5px">${p.salesDays} 天有營收記錄</span>
-    </div>
+    ${dateRangeBar("PageProfit", PageProfit, `<span class="t-muted" style="font-size:12.5px">${p.rangeDays} 天內 ${p.salesDays} 天有營收記錄</span>`)}
     <div class="kpi-row">
-      <div class="kpi"><div class="k-label">${ym} 總營收</div><div class="k-value">${U.fmt$(p.revenue)}</div>
+      <div class="kpi"><div class="k-label">總營收</div><div class="k-value">${U.fmt$(p.revenue)}</div>
         <div class="k-note">${U.fmtNum(p.covers, 0)} 位來客</div></div>
       <div class="kpi"><div class="k-label">總支出</div><div class="k-value">${U.fmt$(p.totalCost)}</div></div>
       <div class="kpi ${p.profit >= 0 ? "good" : "bad"}"><div class="k-label">總獲利 ★</div>
@@ -59,7 +70,7 @@ const PageProfit = {
     </div>
 
     <div class="card">
-      <h3>💹 ${ym} 損益表</h3>
+      <h3>💹 損益表 <span class="sub">${rangeLabel(PageProfit)}</span></h3>
       <div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>項目</th><th class="num">金額</th><th class="num">占營收</th></tr></thead><tbody>
         ${row("<b>營業收入</b>", p.revenue, { bold: true })}
@@ -80,7 +91,7 @@ const PageProfit = {
         ${row(`全支付(${U.pct(DB.setting("feeJkoPct"), 1)})`, p.fees.jko, { indent: true, minus: true })}
         ${row("<b>稅金</b>", p.tax, { bold: true, minus: true, cls: "t-red" })}
         <tr style="background:${p.profit >= 0 ? "#e2f3e9" : "#fdeaea"};font-weight:800;font-size:15px">
-          <td>＝ 本月總獲利</td>
+          <td>＝ 區間總獲利</td>
           <td class="num ${p.profit >= 0 ? "t-green" : "t-red"}">${p.profit < 0 ? "−" : ""}${U.fmt$(Math.abs(p.profit))}</td>
           <td class="num">${p.margin == null ? "—" : U.pct(p.margin)}</td></tr>
       </tbody></table></div>
@@ -98,12 +109,12 @@ const PageProfit = {
 
 /* ---------------- PT 人力成本 ---------------- */
 const PageLabor = {
-  month: null,
+  from: null, to: null,
 
   render(c) {
-    const ym = PageLabor.month || U.thisMonth();
-    PageLabor.month = ym;
-    const logs = U.sortBy(DB.get("laborLogs").filter(l => U.monthOf(l.date) === ym), l => l.date, true);
+    const from = PageLabor.from || (PageLabor.from = U.monthStart());
+    const to = PageLabor.to || (PageLabor.to = U.today());
+    const logs = U.sortBy(DB.get("laborLogs").filter(l => l.date >= from && l.date <= to), l => l.date, true);
     const total = U.sum(logs, Domain.laborCost);
     const totalHours = U.sum(logs, l => l.hours || 0);
     // 依人員彙總
@@ -118,19 +129,14 @@ const PageLabor = {
 
     c.innerHTML = `
     <div class="alert info">💡 公式:<b>時薪 × 時數 + 獎金 − 勞健保 = 人力成本</b>。每天(或每週彙總)登記 PT 班表即可,月財報自動加總。</div>
-    <div class="toolbar">
-      <label class="fl" style="margin:0">月份:</label>
-      <select onchange="PageLabor.month=this.value;App.refresh()">${monthOptions(ym)}</select>
-      <div class="spacer"></div>
-      <button class="btn primary" onclick="PageLabor.edit()">＋ 登記人力</button>
-    </div>
+    ${dateRangeBar("PageLabor", PageLabor, `<div class="spacer"></div><button class="btn primary" onclick="PageLabor.edit()">＋ 登記人力</button>`)}
     <div class="kpi-row">
-      <div class="kpi"><div class="k-label">${ym} 人力成本合計</div><div class="k-value">${U.fmt$(total)}</div></div>
+      <div class="kpi"><div class="k-label">人力成本合計</div><div class="k-value">${U.fmt$(total)}</div></div>
       <div class="kpi"><div class="k-label">總時數</div><div class="k-value">${U.fmtNum(totalHours)} 小時</div></div>
       <div class="kpi"><div class="k-label">平均時薪成本</div>
         <div class="k-value" style="font-size:19px">${totalHours ? U.fmt$(Math.round(total / totalHours)) : "—"}/hr</div></div>
     </div>
-    <div class="card"><h3>依人員彙總(${ym})</h3>
+    <div class="card"><h3>依人員彙總 <span class="sub">${rangeLabel(PageLabor)}</span></h3>
       ${UI.table(["人員", "#時數", "#薪資", "#獎金", "#勞健保", "#小計"],
         U.sortBy(Object.entries(byName), e => e[1].wage, true).map(([name, e]) => `<tr>
           <td><b>${U.esc(name)}</b></td>
@@ -138,7 +144,7 @@ const PageLabor = {
           <td class="num">${U.fmt$(e.wage)}</td>
           <td class="num">${e.bonus ? "+" + U.fmt$(e.bonus) : "—"}</td>
           <td class="num">${e.insurance ? "−" + U.fmt$(e.insurance) : "—"}</td>
-          <td class="num"><b>${U.fmt$(e.wage + e.bonus - e.insurance)}</b></td></tr>`), "本月尚無登記")}
+          <td class="num"><b>${U.fmt$(e.wage + e.bonus - e.insurance)}</b></td></tr>`), "此區間尚無登記")}
     </div>
     <div class="card"><h3>登記明細</h3>
       ${UI.table(["日期", "人員", "#時薪", "#時數", "#獎金", "#勞健保", "#成本", "備註", "操作"],
@@ -152,7 +158,7 @@ const PageLabor = {
           <td class="t-muted">${U.esc(l.note || "")}</td>
           <td><button class="btn small" onclick="PageLabor.edit('${l.id}')">編輯</button>
               <button class="btn small ghost-red" onclick="DB.remove('laborLogs','${l.id}');App.refresh()">✕</button></td></tr>`),
-        "本月尚無登記")}
+        "此區間尚無登記")}
     </div>`;
   },
 
@@ -284,11 +290,11 @@ const PageExpense = {
 
 /* ---------------- 廠商進貨分析(叫了多少錢 / 占比) ---------------- */
 const PageSupplierSpend = {
-  month: null,   // "全部" = 不限期間
+  from: null, to: null,
 
   // 依進貨單彙總各廠商:金額(與貨款單同一套四捨五入)、單數、品項次數
-  summary(ym) {
-    const grs = DB.get("goodsReceipts").filter(g => ym === "全部" || (g.date || "").slice(0, 7) === ym);
+  summary(from, to) {
+    const grs = DB.get("goodsReceipts").filter(g => g.date >= from && g.date <= to);
     const map = {};
     for (const g of grs) {
       const key = g.supplierId || "(未指定廠商)";
@@ -306,9 +312,9 @@ const PageSupplierSpend = {
   },
 
   render(c) {
-    const ym = PageSupplierSpend.month || U.thisMonth();
-    PageSupplierSpend.month = ym;
-    const { list, total, orderCount } = PageSupplierSpend.summary(ym);
+    const from = PageSupplierSpend.from || (PageSupplierSpend.from = U.monthStart());
+    const to = PageSupplierSpend.to || (PageSupplierSpend.to = U.today());
+    const { list, total, orderCount } = PageSupplierSpend.summary(from, to);
     const top = list[0];
 
     // 各廠商在不同月份的金額,用來看「這家是不是變貴/叫更多」
@@ -317,13 +323,7 @@ const PageSupplierSpend = {
 
     c.innerHTML = `
     <div class="alert info">💡 統計各廠商的進貨金額與占比,金額與貨款單同一套算法(每列四捨五入到整數元)。用途:看錢主要花在哪幾家、談判時心裡有底、發現某家占比突然變高。</div>
-    <div class="toolbar">
-      <label class="fl" style="margin:0">期間:</label>
-      <select onchange="PageSupplierSpend.month=this.value;App.refresh()" style="min-width:150px">
-        <option ${ym === "全部" ? "selected" : ""}>全部</option>
-        ${monthOptions(ym)}
-      </select>
-    </div>
+    ${dateRangeBar("PageSupplierSpend", PageSupplierSpend)}
     <div class="kpi-row">
       <div class="kpi"><div class="k-label">進貨總額</div><div class="k-value">${U.fmt$(total)}</div>
         <div class="k-note">${orderCount} 張進貨單 · ${list.length} 家廠商</div></div>
@@ -334,7 +334,7 @@ const PageSupplierSpend = {
         <div class="k-note">${top && top.share > 0.5 ? "單一廠商過半,議價空間有限" : "分散度尚可"}</div></div>
     </div>
     <div class="card">
-      <h3>🏢 各廠商進貨金額 <span class="sub">${ym === "全部" ? "全部期間" : ym}</span></h3>
+      <h3>🏢 各廠商進貨金額 <span class="sub">${rangeLabel(PageSupplierSpend)}</span></h3>
       ${UI.table(["廠商", "#進貨單數", "#品項次數", "#金額", "#占比", "占比圖", "最後進貨日"],
         list.map(r => `<tr>
           <td><b>${U.esc(UI.supName(r.supplierId))}</b></td>

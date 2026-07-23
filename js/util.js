@@ -20,6 +20,7 @@ const U = {
   isWeekend(dateStr) { const w = U.weekday(dateStr); return w === 0 || w === 6; },
   monthOf(dateStr) { return dateStr.slice(0, 7); },
   thisMonth() { return U.today().slice(0, 7); },
+  monthStart() { return U.thisMonth() + "-01"; },   // 本月一號
   monthDays(ym) { // 回傳該月所有日期字串
     const [y, m] = ym.split("-").map(Number);
     const last = new Date(y, m, 0).getDate();

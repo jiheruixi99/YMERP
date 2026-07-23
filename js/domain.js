@@ -473,9 +473,18 @@ const Domain = {
     return Math.round((l.hourlyRate || 0) * (l.hours || 0)) + (l.bonus || 0) - (l.insurance || 0);
   },
 
+  // 舊介面:吃「年-月」→ 轉成該月起訖日呼叫 pnl(儀表板等仍可用)
   monthlyPnl(ym) {
     const days = U.monthDays(ym);
-    const from = days[0], to = days[days.length - 1];
+    const r = Domain.pnl(days[0], days[days.length - 1]);
+    r.ym = ym;
+    return r;
+  },
+
+  // 任意起訖日的損益。備援估計值(月估)會依區間天數 / 30 換算,避免整月估計硬套到短區間。
+  pnl(from, to) {
+    const rangeDays = Math.max(1, U.diffDays(from, to) + 1);
+    const estFactor = rangeDays / 30;   // 月備援估計 → 依天數比例縮放
     // 營收(依支付方式;舊資料 payMobile 視為 LINE Pay)
     const sales = DB.get("salesDaily").filter(s => s.date >= from && s.date <= to);
     const revenue = U.sum(sales, s => s.revenue);
@@ -501,16 +510,16 @@ const Domain = {
     const laborLogs = DB.get("laborLogs").filter(l => l.date >= from && l.date <= to);
     let labor = U.sum(laborLogs, Domain.laborCost);
     let laborEst = false;
-    if (!laborLogs.length && DB.setting("monthlyLabor")) { labor = DB.setting("monthlyLabor"); laborEst = true; }
+    if (!laborLogs.length && DB.setting("monthlyLabor")) { labor = Math.round(DB.setting("monthlyLabor") * estFactor); laborEst = true; }
     // 營業費用(支出登記;無登記則用備援估計)
     const exps = DB.get("expenses").filter(x => x.date >= from && x.date <= to);
     const expByCat = {};
     for (const x of exps) expByCat[x.category] = (expByCat[x.category] || 0) + x.amount;
     let expEst = false;
     if (!exps.length) {
-      if (DB.setting("monthlyRent")) expByCat["租金"] = DB.setting("monthlyRent");
-      if (DB.setting("monthlyUtility")) expByCat["水電"] = DB.setting("monthlyUtility");
-      if (DB.setting("monthlyOther")) expByCat["雜費"] = DB.setting("monthlyOther");
+      if (DB.setting("monthlyRent")) expByCat["租金"] = Math.round(DB.setting("monthlyRent") * estFactor);
+      if (DB.setting("monthlyUtility")) expByCat["水電"] = Math.round(DB.setting("monthlyUtility") * estFactor);
+      if (DB.setting("monthlyOther")) expByCat["雜費"] = Math.round(DB.setting("monthlyOther") * estFactor);
       expEst = !!Object.keys(expByCat).length;
     }
     const tax = expByCat["稅金"] || 0;
@@ -525,7 +534,7 @@ const Domain = {
     const totalCost = purchasesFood + purchasesMisc + labor + expensesTotal + feeTotal + tax;
     const profit = revenue - totalCost;
     return {
-      ym, from, to, revenue, pay, covers: U.sum(sales, s => s.covers), salesDays: sales.length,
+      from, to, rangeDays, revenue, pay, covers: U.sum(sales, s => s.covers), salesDays: sales.length,
       purchasesFood, purchasesMisc, labor, laborEst, laborCount: laborLogs.length,
       expByCat, expensesTotal, expEst, tax, fees, feeTotal,
       totalCost, profit, margin: revenue ? profit / revenue : null
