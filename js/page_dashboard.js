@@ -2,26 +2,26 @@
 "use strict";
 
 const PageDash = {
+  from: null, to: null,
+
   render(c) {
     const today = U.today();
-    const ym = U.thisMonth();
-    const monthDays = U.monthDays(ym).filter(d => d <= today);
-    const mFrom = monthDays[0], mTo = monthDays[monthDays.length - 1];
+    const mFrom = PageDash.from || (PageDash.from = U.monthStart());
+    const mTo = PageDash.to || (PageDash.to = today);
     const target = DB.setting("targetCostRate");
 
-    // 本月數據
+    // 選定區間的數據
     const rev = Domain.revenue(mFrom, mTo);
     const fc = Domain.foodCost(mFrom, mTo);
     const rate = rev.revenue > 0 ? fc.actual / rev.revenue : null;
 
-    // 今日
+    // 今日(不受區間影響,永遠看今天)
     const todaySales = DB.get("salesDaily").find(s => s.date === today);
     const todayCost = Domain.foodCost(today, today);
     const yFc = Domain.forecastCovers(today);
 
-    // 30 天成本率趨勢
-    const series = Domain.costRateSeries(U.addDays(today, -30), U.addDays(today, -1))
-      .filter(d => d.revenue > 0);
+    // 成本率趨勢(跟著選定區間走)
+    const series = Domain.costRateSeries(mFrom, mTo).filter(d => d.revenue > 0);
 
     // 警示
     const alerts = Domain.priceAlerts();
@@ -32,19 +32,20 @@ const PageDash = {
     const kpiCls = rate == null ? "" : rate <= target ? "good" : rate <= target + 0.05 ? "warn" : "bad";
 
     c.innerHTML = `
+    ${dateRangeBar("PageDash", PageDash, `<span class="t-muted" style="font-size:12.5px">下方「今日速報」「效期/庫存警示」不受區間影響,永遠顯示目前狀況</span>`)}
     <div class="kpi-row">
       <div class="kpi ${kpiCls}">
-        <div class="k-label">本月食材成本率(實際)★</div>
+        <div class="k-label">食材成本率(實際)★</div>
         <div class="k-value">${rate == null ? "—" : U.pct(rate)}</div>
         <div class="k-note">目標 ≤ ${U.pct(target, 0)}|理論 ${rev.revenue > 0 ? U.pct(fc.theo / rev.revenue) : "—"}</div>
       </div>
       <div class="kpi">
-        <div class="k-label">本月營收 / 來客</div>
+        <div class="k-label">區間營收 / 來客</div>
         <div class="k-value">${U.fmt$(rev.revenue)}</div>
         <div class="k-note">${U.fmtNum(rev.covers, 0)} 位|客單 ${rev.covers ? U.fmt$(Math.round(rev.revenue / rev.covers)) : "—"}</div>
       </div>
       <div class="kpi">
-        <div class="k-label">本月食材成本(實際)</div>
+        <div class="k-label">區間食材成本(實際)</div>
         <div class="k-value">${U.fmt$(fc.actual)}</div>
         <div class="k-note">損耗 ${U.fmt$(fc.waste)}+盤虧 ${U.fmt$(fc.countLoss)}</div>
       </div>
@@ -61,7 +62,7 @@ const PageDash = {
     </div>
 
     <div class="card">
-      <h3>📉 食材成本率趨勢(近 30 天)<span class="sub">實際成本 ÷ 當日營收,虛線為目標值</span></h3>
+      <h3>📉 食材成本率趨勢 <span class="sub">${mFrom} ~ ${mTo}|實際成本 ÷ 當日營收,虛線為目標值</span></h3>
       ${Chart.line({
         width: 900, height: 250,
         series: [{ name: "實際成本率", color: "#c62f2f", data: series.map(d => ({ x: U.mdLabel(d.date), y: d.rate == null ? null : +(d.rate * 100).toFixed(1) })) },
@@ -115,7 +116,7 @@ const PageDash = {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3>🗑️ 本月損耗來源 <span class="sub">合計 ${U.fmt$(waste.total)}</span></h3>
+      <h3>🗑️ 區間損耗來源 <span class="sub">合計 ${U.fmt$(waste.total)}</span></h3>
       ${Chart.bar({
         width: 700, height: 200, showVal: true, color: "#b26a00",
         data: U.sortBy(Object.entries(waste.byReason), e => e[1], true).map(([k, v]) => ({ x: k, y: Math.round(v / 100) })),

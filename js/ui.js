@@ -119,3 +119,21 @@ const UI = {
     return `<span class="${cls}">${arrow}${U.pct(Math.abs(v))}</span>`;
   }
 };
+
+/* 共用的「從~到」日期區間工具列(儀表板/進貨/財報/報表共用)。
+   pageRef 是 page 物件在全域的名字(如 "PageProfit");fromKey/toKey 是欄位名(預設 from/to,
+   同一頁有兩組區間時可傳不同名,如 sFrom/sTo)。回傳工具列 HTML;extra 接在右邊。
+   預設值為「本月一號 ~ 今天」,會就地寫回 page 物件。 */
+function dateRangeBar(pageRef, page, extra, fromKey, toKey) {
+  fromKey = fromKey || "from"; toKey = toKey || "to";
+  if (!page[fromKey]) page[fromKey] = U.monthStart();
+  if (!page[toKey]) page[toKey] = U.today();
+  return `<div class="toolbar">
+    <label class="fl" style="margin:0">期間:</label>
+    <input type="date" value="${page[fromKey]}" onchange="${pageRef}.${fromKey}=this.value;App.refresh()">
+    <span>~</span>
+    <input type="date" value="${page[toKey]}" onchange="${pageRef}.${toKey}=this.value;App.refresh()">
+    ${extra || ""}
+  </div>`;
+}
+function rangeLabel(page, fromKey, toKey) { return page[fromKey || "from"] + " ~ " + page[toKey || "to"]; }

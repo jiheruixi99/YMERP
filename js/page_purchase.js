@@ -33,17 +33,24 @@ const GRPhoto = {
 const PagePurchase = {
   poLines: [],
   trendIng: "i_cabbage",
+  from: null, to: null,   // 進貨記錄顯示區間(預設本月)
 
   /* ---------------- 進貨登記(每天 Key 各廠商進貨表) ---------------- */
   renderPO(c) {
-    const grs = U.sortBy(DB.get("goodsReceipts"), g => g.date, true);
+    const from = PagePurchase.from || (PagePurchase.from = U.monthStart());
+    const to = PagePurchase.to || (PagePurchase.to = U.today());
+    const all = U.sortBy(DB.get("goodsReceipts"), g => g.date, true);
+    const grs = all.filter(g => g.date >= from && g.date <= to);
+    const rangeTotal = U.sum(grs, g => U.sum(g.lines, l => U.lineAmt(l.qtyReceived, l.unitPrice)));
     c.innerHTML = `
     <div class="alert info">💡 每天 Key 各廠商的進貨表:選供應商(只列該廠商品項)→ 輸入品項/數量/單價 → 入庫。入庫後自動更新庫存、最新單價(BOM 成本跟著更新)、價格趨勢。可隨時<b>看明細、修改、刪除</b>更正。</div>
-    <div class="toolbar"><div class="spacer"></div>
-      <button class="btn primary" onclick="PagePhotoGR.open()">＋ 進貨登記</button></div>
-    <div class="card"><h3>進貨記錄</h3>
+    ${dateRangeBar("PagePurchase", PagePurchase, `<span class="badge b-gray">${grs.length} 張單</span>
+      <span class="badge b-blue">合計 ${U.fmt$(rangeTotal)}</span>
+      <div class="spacer"></div>
+      <button class="btn primary" onclick="PagePhotoGR.open()">＋ 進貨登記</button>`)}
+    <div class="card"><h3>進貨記錄 <span class="sub">${from} ~ ${to}</span></h3>
     ${UI.table(["進貨日", "供應商", "#品項數", "#金額", "備註", "操作"],
-      grs.slice(0, 60).map(g => {
+      grs.map(g => {
         const amt = U.sum(g.lines, l => U.lineAmt(l.qtyReceived, l.unitPrice));
         return `<tr><td>${g.date}${(g.hasPhoto || GRPhoto.get(g.id)) ? ' <span title="有送貨單照片">📷</span>' : ""}</td>
         <td>${U.esc(UI.supName(g.supplierId))}</td>
@@ -53,7 +60,7 @@ const PagePurchase = {
         <td><button class="btn small" onclick="PagePhotoGR.view('${g.id}')">明細</button>
             <button class="btn small" onclick="PagePhotoGR.open('${g.id}')">修改</button>
             <button class="btn small ghost-red" onclick="PagePhotoGR.del('${g.id}')">刪除</button></td></tr>`;
-      }), "尚無進貨記錄,點右上「＋ 進貨登記」開始")}
+      }), all.length ? "這個區間沒有進貨記錄(整份共 " + all.length + " 張,調整上方日期看其他期間)" : "尚無進貨記錄,點右上「＋ 進貨登記」開始")}
     </div>`;
   },
 
