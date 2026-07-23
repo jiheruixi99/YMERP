@@ -90,7 +90,9 @@ const PageIng = {
         <div><label class="fl">效期天數</label><input id="f_life" type="number" value="${i.shelfLifeDays}" style="width:100%"></div>
         <div><label class="fl">預設供應商</label><select id="f_sup" style="width:100%">${UI.supOptions(i.defaultSupplierId || opts.supplierId)}</select></div>
         <div><label class="fl">季節性(菜價浮動大)</label><label style="display:flex;align-items:center;gap:6px;padding:7px 0"><input type="checkbox" id="f_season" ${i.seasonal ? "checked" : ""}> 價格隨季節波動</label></div>
-      </div>`,
+        <div><label class="fl">自助吧品項</label><label style="display:flex;align-items:center;gap:6px;padding:7px 0"><input type="checkbox" id="f_buffet" ${i.buffet ? "checked" : ""}> 吃到飽自助吧(用量算不準)</label></div>
+      </div>
+      <p class="hint">💡 勾「自助吧品項」= 火鍋料/蔬菜/飲品/麵食這種自由取用、算不出每份用量的。勾了之後不進「理論vs實際」比對,改在「自助吧使用量」用盤點法(期初+進貨−期末)看消耗。肉品/海鮮/湯品這種有打 BOM 的<b>不要勾</b>。</p>`,
       {
         width: 720,
         onCancel: opts.onCancel,   // 讓呼叫端(如進貨登記)在使用者放棄建檔時能回到原視窗
@@ -117,7 +119,7 @@ const PageIng = {
             purToStock: 1, stockToUse: UI.num("f_s2u") || 1,
             shelfLifeDays: UI.num("f_life") || 5, safetyStock: UI.num("f_safe"),
             basePrice: U.toCents(UI.val("f_price")), defaultSupplierId: UI.val("f_sup"),
-            seasonal: UI.checked("f_season"), active: true
+            seasonal: UI.checked("f_season"), buffet: UI.checked("f_buffet"), active: true
           };
           let ing;
           if (id) ing = DB.update("ingredients", id, patch);

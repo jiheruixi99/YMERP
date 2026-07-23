@@ -18,7 +18,9 @@ const Domain = {
       const asc = U.sortBy(sp, p => p.effectiveDate);
       return asc[asc.length - 1].unitPrice;
     }
-    return 0;
+    // 都沒有進價/報價時,退回建檔時填的參考單價(至少不會算成 0 元)
+    const ing = DB.byId("ingredients", ingId);
+    return (ing && ing.basePrice) || 0;
   },
   currentPrice(ingId) { return Domain.priceAt(ingId, null); },
 
@@ -431,6 +433,7 @@ const Domain = {
     for (const [ingId, e] of Object.entries(map)) {
       const ing = DB.byId("ingredients", ingId);
       if (!ing) continue;
+      if (ing.buffet) continue;   // 自助吧品項算不出理論用量,改在「自助吧使用量」用盤點法看
       const actQty = e.theoQty + e.wasteQty - e.adjQty;
       const actCost = e.theoCost + e.wasteCost - e.adjCost;
       const diffCost = actCost - e.theoCost;
@@ -438,6 +441,29 @@ const Domain = {
       rows.push({ ing, ...e, actQty, actCost, diffQty: actQty - e.theoQty, diffCost });
     }
     return U.sortBy(rows, r => r.diffCost, true);
+  },
+
+  /* 盤點法區間消耗:兩次盤點之間,期初實盤 + 期間進貨 − 期末實盤 = 消耗。
+     只算兩次都有盤到的品項;filterFn 可再篩(例如只要自助吧品項)。 */
+  intervalConsumption(cFromId, cToId, filterFn) {
+    const cFrom = DB.byId("stockCounts", cFromId), cTo = DB.byId("stockCounts", cToId);
+    if (!cFrom || !cTo || cFrom.date >= cTo.date) return null;
+    const fromMap = {}, toMap = {};
+    for (const l of cFrom.lines) fromMap[l.ingredientId] = l.actualQty;
+    for (const l of cTo.lines) toMap[l.ingredientId] = l.actualQty;
+    const rows = [];
+    for (const ingId of Object.keys(fromMap)) {
+      if (!(ingId in toMap)) continue;
+      const ing = DB.byId("ingredients", ingId);
+      if (!ing) continue;
+      if (filterFn && !filterFn(ing)) continue;
+      const purchases = U.sum(DB.get("stockMovements").filter(m =>
+        m.ingredientId === ingId && m.type === "進貨" && m.date > cFrom.date && m.date <= cTo.date), m => m.qty);
+      const consumed = Math.round((fromMap[ingId] + purchases - toMap[ingId]) * 100) / 100;
+      const price = Domain.priceAt(ingId, cTo.date);
+      rows.push({ ing, opening: fromMap[ingId], purchases, closing: toMap[ingId], consumed, price, cost: Math.round(consumed * price) });
+    }
+    return { cFrom, cTo, days: U.diffDays(cFrom.date, cTo.date), rows: U.sortBy(rows, r => r.cost, true) };
   },
 
   /* ================== 月財報(現金基礎損益) ==================

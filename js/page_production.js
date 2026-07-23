@@ -4,6 +4,7 @@
 const PageProd = {
   date: null,
   varFrom: null, varTo: null,
+  bufFrom: null, bufTo: null,
 
   /* ---------------- 備料工單 ---------------- */
   renderMO(c) {
@@ -133,7 +134,7 @@ const PageProd = {
     const rev = Domain.revenue(from, to);
 
     c.innerHTML = `
-    <div class="alert info">💡 <b>理論用量</b>=備料工單領料;<b>實際消耗</b>=領料+損耗登記+盤點差異。差異金額就是「成本外流點」,依金額由大到小排列 — 優先處理前幾名品項。</div>
+    <div class="alert info">💡 這頁只比對「有打 BOM、算得出理論用量」的品項(肉品/海鮮/湯品)。<b>理論用量</b>=備料工單領料;<b>實際消耗</b>=領料+損耗登記+盤點差異。差異金額就是「成本外流點」,依金額由大到小排列。<br>火鍋料/蔬菜/飲品/麵食等<b>自助吧品項</b>(在食材建檔勾選)算不出每份用量,已排除在此表外,改看下方「自助吧使用量」。</div>
     <div class="toolbar">
       <label class="fl" style="margin:0">期間:</label>
       <input type="date" value="${from}" onchange="PageProd.varFrom=this.value;App.refresh()">~
@@ -162,6 +163,65 @@ const PageProd = {
             <td class="t-muted">${r.diffCost > 100 ? wasteMain : "—"}</td>
           </tr>`;
         }), "期間內無用量記錄")}
+    </div>
+    ${PageProd.buffetUsageCard()}`;
+  },
+
+  /* ---------------- 自助吧使用量(盤點法) ---------------- */
+  buffetUsageCard() {
+    const buffetItems = DB.get("ingredients").filter(i => i.active !== false && i.buffet);
+    if (!buffetItems.length) {
+      return `<div class="card"><h3>🍲 自助吧使用量</h3>
+        <div class="empty">尚未有自助吧品項。到「食材品項」編輯火鍋料/蔬菜/飲品/麵食,勾選「自助吧品項」即可歸類到這裡。</div></div>`;
+    }
+    const counts = U.sortBy(DB.get("stockCounts"), x => x.date); // 升冪
+    if (counts.length < 2) {
+      return `<div class="card"><h3>🍲 自助吧使用量 <span class="sub">盤點法:期初 + 進貨 − 期末 = 消耗</span></h3>
+        <div class="empty">需要至少兩次盤點才能算(這些品項沒有配方可推算,只能靠盤點)。到「庫存 → 定期盤點」每週盤一次,下週就有數字。<br>
+        <span class="hint">目前有 ${buffetItems.length} 個自助吧品項待盤點。</span></div></div>`;
+    }
+    if (!PageProd.bufFrom || !counts.find(x => x.id === PageProd.bufFrom)) PageProd.bufFrom = counts[counts.length - 2].id;
+    if (!PageProd.bufTo || !counts.find(x => x.id === PageProd.bufTo)) PageProd.bufTo = counts[counts.length - 1].id;
+    const sel = which => `<select onchange="PageProd.${which}=this.value;App.refresh()">` +
+      counts.map(x => `<option value="${x.id}" ${x.id === PageProd[which] ? "selected" : ""}>${x.date}</option>`).join("") + `</select>`;
+    const head = `<div class="toolbar">期初盤點:${sel("bufFrom")} → 期末盤點:${sel("bufTo")}</div>`;
+
+    const res = Domain.intervalConsumption(PageProd.bufFrom, PageProd.bufTo, ing => ing.buffet);
+    if (!res) {
+      return `<div class="card"><h3>🍲 自助吧使用量</h3>${head}
+        <div class="alert warn">期初盤點日必須早於期末盤點日</div></div>`;
+    }
+    const totalCost = U.sum(res.rows, r => r.cost);
+    const rev = Domain.revenue(U.addDays(res.cFrom.date, 1), res.cTo.date);
+    const countedIds = new Set(res.rows.map(r => r.ing.id));
+    const missed = buffetItems.filter(i => !countedIds.has(i.id));
+
+    return `<div class="card">
+      <h3>🍲 自助吧使用量 <span class="sub">盤點法:期初實盤 + 期間進貨 − 期末實盤 = 消耗(火鍋料/蔬菜/飲品/麵食)</span></h3>
+      ${head}<span class="badge b-gray" style="margin-left:6px">${res.days} 天</span>
+      <div class="kpi-row" style="margin-top:12px">
+        <div class="kpi"><div class="k-label">自助吧消耗成本</div><div class="k-value">${U.fmt$(totalCost)}</div>
+          <div class="k-note">日均 ${U.fmt$(Math.round(totalCost / res.days))}</div></div>
+        <div class="kpi"><div class="k-label">區間營收</div><div class="k-value">${U.fmt$(rev.revenue)}</div>
+          <div class="k-note">${rev.covers} 位來客</div></div>
+        <div class="kpi ${rev.revenue && totalCost / rev.revenue > 0.30 ? "warn" : "good"}">
+          <div class="k-label">自助吧成本占營收</div>
+          <div class="k-value">${rev.revenue ? U.pct(totalCost / rev.revenue) : "—"}</div>
+          <div class="k-note">此範圍內品項</div></div>
+      </div>
+      ${UI.table(["品項", "分類", "#期初", "#進貨", "#期末", "#消耗量", "#日均", "#消耗成本 ▼"],
+        res.rows.map(r => `<tr>
+          <td><b>${U.esc(r.ing.name)}</b></td>
+          <td><span class="badge b-gray">${U.esc(r.ing.category)}</span></td>
+          <td class="num">${U.fmtNum(r.opening)}</td>
+          <td class="num t-green">+${U.fmtNum(r.purchases)}</td>
+          <td class="num">${U.fmtNum(r.closing)}</td>
+          <td class="num ${r.consumed < 0 ? "t-red" : ""}"><b>${U.fmtNum(r.consumed)} ${U.esc(r.ing.stockUnit)}</b></td>
+          <td class="num">${U.fmtNum(r.consumed / res.days)}</td>
+          <td class="num">${U.fmt$(r.cost)}</td></tr>`),
+        "這兩次盤點沒有共同的自助吧品項")}
+      ${missed.length ? `<p class="hint">⚠️ 這 ${missed.length} 個自助吧品項這兩次沒都盤到,未列入:${missed.slice(0, 8).map(i => U.esc(i.name)).join("、")}${missed.length > 8 ? "…" : ""}。盤點時記得補上才算得準。</p>` : ""}
+      <p class="hint">消耗量出現<b class="t-red">負數</b>=期末比「期初+進貨」還多 → 可能漏登記進貨或盤點打錯,建議回頭檢查。</p>
     </div>`;
   }
 };
