@@ -494,7 +494,8 @@ const PagePhotoGR = {
       if (stockUnitPrice > 0) {
         DB.insert("priceHistory", { ingredientId: ing.id, supplierId, unitPrice: stockUnitPrice, date, grId });
         const q = DB.get("supplierPrices").find(x => x.supplierId === supplierId && x.ingredientId === ing.id);
-        if (q) DB.update("supplierPrices", q.id, { unitPrice: stockUnitPrice, effectiveDate: date });
+        // 報價的「最新價」以進貨日判斷,不以輸入順序 —— 補 key 舊日期的單不會蓋掉較新的報價
+        if (q) { if (!q.effectiveDate || date >= q.effectiveDate) DB.update("supplierPrices", q.id, { unitPrice: stockUnitPrice, effectiveDate: date }); }
         else DB.insert("supplierPrices", { supplierId, ingredientId: ing.id, unitPrice: stockUnitPrice, effectiveDate: date });
       }
       grLines.push({ ingredientId: ing.id, qtyReceived: r.qty, unitPrice: r.unitPrice, batchNo, expiry: r.expiry || null });
