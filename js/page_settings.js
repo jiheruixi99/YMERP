@@ -54,10 +54,14 @@ const PageSet = {
         <div class="full"><label class="fl">GAS Web App URL</label>
           <input id="set_gasdb" value="${U.esc(s.gasDbUrl || "")}" placeholder="https://script.google.com/macros/s/…/exec" style="width:100%"></div>
         <div><label class="fl">同步密碼(需與 GAS 程式內 TOKEN 相同)</label>
-          <input id="set_gastoken" type="password" value="${U.esc(s.gasDbToken || "")}" style="width:100%" autocomplete="off"></div>
+          <div style="display:flex;gap:6px">
+            <input id="set_gastoken" type="password" value="${U.esc(s.gasDbToken || "")}" style="flex:1" autocomplete="off">
+            <button class="btn small" onclick="PageSet.toggleToken(this)" type="button">👁</button>
+          </div></div>
         <div><label class="fl">自動同步</label>
           <label style="display:flex;align-items:center;gap:6px;padding:7px 0"><input type="checkbox" id="set_autosync" ${s.autoSync ? "checked" : ""}> 開啟時檢查+改資料後 45 秒自動上傳</label></div>
       </div>
+      ${PageSet.tokenStrength(s.gasDbToken || "")}
       <div class="toolbar" style="margin-top:10px">
         <button class="btn" onclick="PageSet.save();Sync.testConnection()">🔌 測試連線</button>
         <button class="btn" onclick="PageSet.save();Sync.buildStructure()">🧱 建立完整資料表結構</button>
@@ -65,6 +69,24 @@ const PageSet = {
         <button class="btn" onclick="PageSet.save();UI.confirm('將以本機資料完整覆蓋雲端試算表,確定?',()=>Sync.forcePush())">⬆ 上傳全部(本機→雲端)</button>
         <button class="btn ghost-red" onclick="PageSet.save();UI.confirm('將以雲端試算表完整覆蓋本機資料,確定?(建議先匯出備份)',()=>Sync.forcePull())">⬇ 下載全部(雲端→本機)</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h3>🔐 安全性</h3>
+      <p class="hint" style="margin-bottom:10px">程式碼公開在 GitHub <b>不是</b>風險(裡面沒有你的網址或密碼)。真正的鑰匙只有兩樣:<b>GAS 網址 + 同步密碼</b>。守好它們,別人就進不來。</p>
+      <div class="mini-title">✅ 安全檢查清單</div>
+      <ul style="font-size:13px;line-height:1.9;margin:0 0 12px 18px">
+        <li><b>用高強度密碼</b>:別用電話號碼/生日這種好猜的。按下方「產生高強度密碼」→ 複製到 GAS 程式的 <span class="mono">TOKEN</span> 與這裡,兩邊一致。</li>
+        <li><b>試算表本身設「限制存取」</b>:到試算表右上「共用」,確認不是「知道連結的任何人」——否則有人拿到試算表網址就能繞過密碼直接看。</li>
+        <li><b>定期備份</b>:下方按鈕存 JSON 快照到雲端硬碟;或在 GAS 執行一次 <span class="mono">setupDailyBackup</span> 開啟每日自動備份。被竄改也能回溯。</li>
+        <li><b>試算表有版本記錄</b>:被改壞了,到試算表「檔案 → 版本記錄」可還原到任一時間點。</li>
+        <li><b>共用裝置要注意</b>:密碼存在該裝置瀏覽器裡,任何能用那台裝置的人都能同步你的資料。共用平板用完鎖定,別在別人電腦留著設定。</li>
+      </ul>
+      <div class="toolbar">
+        <button class="btn" onclick="PageSet.genToken()">🎲 產生高強度密碼</button>
+        <button class="btn" onclick="PageSet.save();Sync.backup()">🔐 立即備份到雲端硬碟</button>
+      </div>
+      <div id="set_gentoken" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <h3>💾 資料備份 / 還原</h3>
@@ -110,6 +132,44 @@ const PageSet = {
     if (typeof Sync !== "undefined") Sync.init();
     UI.toast("設定已儲存");
     App.refresh();
+  },
+
+  // 顯示/隱藏同步密碼
+  toggleToken(btn) {
+    const el = document.getElementById("set_gastoken");
+    if (!el) return;
+    el.type = el.type === "password" ? "text" : "password";
+    btn.textContent = el.type === "password" ? "👁" : "🙈";
+  },
+
+  // 密碼強度提示
+  tokenStrength(tok) {
+    tok = tok || "";
+    if (!tok) return "";
+    const weak = tok.length < 12 || /^\d+$/.test(tok);   // 太短、或純數字(像電話/生日)= 弱
+    return weak
+      ? `<div class="alert warn" style="margin:0">⚠️ 目前密碼偏弱(${/^\d+$/.test(tok) ? "純數字容易被猜" : "長度不足 12 碼"})。建議按下方「🎲 產生高強度密碼」換一組,GAS 與這裡同步更新。</div>`
+      : `<div class="alert info" style="margin:0">🔒 密碼強度良好(${tok.length} 碼、含英數)。</div>`;
+  },
+
+  // 產生一組高強度隨機密碼(24 碼英數),用瀏覽器安全亂數
+  genToken() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    const buf = new Uint32Array(24);
+    (window.crypto || window.msCrypto).getRandomValues(buf);
+    let t = "";
+    for (let i = 0; i < 24; i++) t += chars[buf[i] % chars.length];
+    const box = document.getElementById("set_gentoken");
+    box.innerHTML = `<div class="alert info" style="margin:0">
+      新密碼:<b class="mono" style="font-size:14px;user-select:all">${t}</b>
+      <button class="btn small" style="margin-left:8px" onclick="PageSet.useToken('${t}')">套用到上方欄位</button>
+      <p class="hint" style="margin:6px 0 0">⚠️ 這只是「產生」。要生效必須:①把它貼到 GAS 程式碼第 8 行 <span class="mono">const TOKEN = "…"</span> 並重新部署;②按這裡「套用」讓本機一致;③其他每台裝置也在設定頁改成同一組。三邊一致才連得上。</p>
+    </div>`;
+  },
+  useToken(t) {
+    const el = document.getElementById("set_gastoken");
+    if (el) { el.value = t; el.type = "text"; }
+    PageSet.save();
   },
 
   importBackup(input) {

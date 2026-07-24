@@ -30,6 +30,17 @@ const Sync = {
 
   hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h; },
 
+  /* ---- 立即備份到雲端硬碟(JSON 快照) ---- */
+  async backup() {
+    if (!Sync.configured()) { UI.toast("請先設定雲端資料庫", true); return; }
+    try {
+      const j = await Sync.call("backup", {});
+      UI.toast("✅ 已備份到雲端硬碟:" + (j.file || "完成"));
+    } catch (e) {
+      UI.toast("備份失敗:" + e.message + "(若說未知 action,請先更新 GAS 程式並重新部署)", true);
+    }
+  },
+
   /* ---- 進貨照片雲端(存 Google 雲端硬碟,跨裝置可看) ---- */
   async savePhoto(grId, dataUrl) { return Sync.call("savePhoto", { grId, dataUrl }); },
   async getPhoto(grId) { const j = await Sync.call("getPhoto", { grId }); return j.dataUrl || ""; },

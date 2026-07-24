@@ -86,7 +86,14 @@ const App = {
     App.route = route;
     App.renderNav();
     App.render();
+    App.toggleNav(false);   // 平板抽屜:點完項目自動收起
     document.getElementById("content").scrollIntoView();
+  },
+
+  // 平板/窄螢幕的側欄抽屜開關;force 傳 true 強制開、false 強制關、省略則切換
+  toggleNav(force) {
+    const open = force === undefined ? !document.body.classList.contains("nav-open") : force;
+    document.body.classList.toggle("nav-open", open);
   },
 
   render() {
@@ -114,5 +121,5 @@ const App = {
 
 document.addEventListener("DOMContentLoaded", App.init);
 document.getElementById && document.addEventListener("keydown", e => {
-  if (e.key === "Escape") UI.closeModal();
+  if (e.key === "Escape") { UI.closeModal(); App.toggleNav(false); }
 });
